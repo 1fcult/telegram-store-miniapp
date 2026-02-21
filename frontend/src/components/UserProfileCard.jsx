@@ -77,8 +77,16 @@ export default function UserProfileCard() {
                     <p className="text-xs text-slate-500 mt-0.5">Бонусный счёт</p>
 
                     {/* Ссылки на панели */}
-                    <div className="flex gap-2 mt-1.5 justify-end">
-                        {isAdmin && (
+                    <div className="flex gap-2 mt-1.5 justify-end flex-wrap">
+                        {isPresident && (
+                            <Link
+                                to="/president"
+                                className="text-xs px-2 py-0.5 rounded-lg bg-yellow-500/20 text-yellow-300 border border-yellow-500/30 hover:bg-yellow-500/30 transition-colors"
+                            >
+                                Панель
+                            </Link>
+                        )}
+                        {isAdmin && !isPresident && (
                             <Link
                                 to="/admin"
                                 className="text-xs px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 transition-colors"
@@ -86,7 +94,7 @@ export default function UserProfileCard() {
                                 Админ
                             </Link>
                         )}
-                        {isCourier && (
+                        {isCourier && !isAdmin && (
                             <Link
                                 to="/courier"
                                 className="text-xs px-2 py-0.5 rounded-lg bg-blue-500/20 text-blue-300 border border-blue-500/30 hover:bg-blue-500/30 transition-colors"

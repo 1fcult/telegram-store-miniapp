@@ -3,14 +3,15 @@ import { AuthProvider, useAuth } from './context/AuthContext'
 import { CartProvider } from './context/CartContext'
 import CatalogPage from './pages/CatalogPage'
 import AdminPage from './pages/AdminPage'
+import PresidentPage from './pages/PresidentPage'
 import CartPage from './pages/CartPage'
 import CheckoutPage from './pages/CheckoutPage'
 import OrdersPage from './pages/OrdersPage'
 import CourierPage from './pages/CourierPage'
-import { Shield, Loader2, Truck, Bot } from 'lucide-react'
+import { Shield, Loader2, Truck, Bot, Crown } from 'lucide-react'
 
 function AppRoutes() {
-  const { user, isLoading, isAdmin, isCourier, authError } = useAuth()
+  const { user, isLoading, isAdmin, isCourier, isPresident, authError } = useAuth()
 
   if (isLoading) {
     return (
@@ -86,6 +87,17 @@ function AppRoutes() {
       <Route path="/cart" element={<CartPage />} />
       <Route path="/checkout" element={<CheckoutPage />} />
       <Route path="/orders" element={<OrdersPage />} />
+      <Route
+        path="/president"
+        element={
+          isPresident
+            ? <PresidentPage />
+            : <div className="w-full max-w-lg mx-auto flex flex-col items-center justify-center min-h-[60vh] gap-4">
+              <Crown className="w-12 h-12 text-yellow-400" />
+              <h2 className="text-xl font-bold text-slate-200">Только для президента</h2>
+            </div>
+        }
+      />
       <Route
         path="/admin"
         element={
