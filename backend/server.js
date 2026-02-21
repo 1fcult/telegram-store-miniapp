@@ -36,6 +36,36 @@ app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ==========================================
+// TELEGRAM NOTIFICATIONS
+// ==========================================
+async function sendTelegramMessage(chatId, text) {
+  if (!BOT_TOKEN) {
+    console.warn('[TBOT] Warning: BOT_TOKEN is not set, skipping notification.');
+    return;
+  }
+  try {
+    const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: text,
+        parse_mode: 'HTML'
+      })
+    });
+    const data = await response.json();
+    if (!data.ok) {
+      console.error(`[TBOT] Error sending message to ${chatId}:`, data.description);
+    } else {
+      console.log(`[TBOT] Message sent successfully to ${chatId}`);
+    }
+  } catch (error) {
+    console.error(`[TBOT] Network error sending message to ${chatId}:`, error);
+  }
+}
+
+// ==========================================
 // TELEGRAM AUTH
 // ==========================================
 
@@ -385,7 +415,7 @@ app.get('/api/categories', async (req, res) => {
 // Роут: Создание категории (только для админов)
 app.post('/api/categories', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { name, shopId, parentId } = req.body;
+    const { name, shopId, parentId, imageUrl } = req.body;
     if (!name) {
       return res.status(400).json({ error: 'Name is required' });
     }
@@ -410,6 +440,7 @@ app.post('/api/categories', requireAuth, requireAdmin, async (req, res) => {
     const newCategory = await prisma.category.create({
       data: {
         name,
+        imageUrl: imageUrl || null,
         shopId: effectiveShopId,
         parentId: parentId ? parseInt(parentId) : null
       }
@@ -486,6 +517,10 @@ app.put('/api/products/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { title, description, price, stock, imageUrls, categoryId, shopId } = req.body;
+
+    // ADMIN check not strictly needed here if we assume they can only edit their products
+    // but better to add restriction if needed.
+
     const updated = await prisma.product.update({
       where: { id: parseInt(id) },
       data: {
@@ -522,7 +557,7 @@ app.delete('/api/products/:id', requireAuth, requireAdmin, async (req, res) => {
 app.put('/api/categories/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, shopId, parentId } = req.body;
+    const { name, shopId, parentId, imageUrl } = req.body;
     if (!name) return res.status(400).json({ error: 'Name is required' });
 
     // Find existing to fallback values if not provided explicitly
@@ -533,6 +568,7 @@ app.put('/api/categories/:id', requireAuth, requireAdmin, async (req, res) => {
       where: { id: parseInt(id) },
       data: {
         name,
+        imageUrl: imageUrl !== undefined ? imageUrl : existing.imageUrl,
         shopId: shopId !== undefined ? (shopId ? parseInt(shopId) : null) : existing.shopId,
         parentId: parentId !== undefined ? (parentId ? parseInt(parentId) : null) : existing.parentId
       }
@@ -626,6 +662,43 @@ app.post('/api/orders', requireAuth, async (req, res) => {
     });
 
     console.log(`[✅ ORDER #${order.id}] ${deliveryMethod} / ${paymentMethod} / ${total}₽`);
+
+    // --- TELEGRAM NOTIFICATIONS ---
+    // 1. Уведомление покупателю
+    const userMessage = `✅ <b>Ваш заказ #${order.id} успешно оформлен!</b>\n\n` +
+      `<b>Сумма:</b> ${total.toLocaleString('ru-RU')} ₽\n` +
+      `<b>Способ оплаты:</b> ${paymentMethod}\n` +
+      `<b>Способ доставки:</b> ${deliveryMethod}\n` +
+      (address ? `<b>Адрес:</b> ${address}\n` : '') +
+      `\n<i>Ожидайте подтверждения. Спасибо за заказ!</i>`;
+
+    await sendTelegramMessage(req.user.telegramId, userMessage);
+
+    // 2. Уведомление Президенту / Администраторам
+    try {
+      // Ищем всех пользователей с ролью PRESIDENT
+      const admins = await prisma.user.findMany({
+        where: { role: 'PRESIDENT' }
+      });
+
+      const adminMessage = `🚨 <b>НОВЫЙ ЗАКАЗ #${order.id}</b>\n\n` +
+        `<b>Клиент:</b> ${req.user.name} (@${req.user.username || 'Без юзернейма'})\n` +
+        `<b>Сумма:</b> ${total.toLocaleString('ru-RU')} ₽\n` +
+        `<b>Оплата:</b> ${paymentMethod}\n` +
+        `<b>Доставка:</b> ${deliveryMethod}\n` +
+        (address ? `<b>Адрес:</b> ${address}\n` : '') +
+        `\nОткройте Admin-панель для обработки.`;
+
+      for (const admin of admins) {
+        if (admin.telegramId) {
+          await sendTelegramMessage(admin.telegramId, adminMessage);
+        }
+      }
+    } catch (err) {
+      console.error('[TBOT] Failed to notify admins:', err);
+    }
+    // ------------------------------
+
     res.status(201).json(order);
   } catch (error) {
     console.error('Error creating order:', error);
@@ -668,6 +741,85 @@ app.get('/api/orders/all', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// Роут: Генерация инвойса Telegram Stars
+app.post('/api/orders/:id/invoice', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const order = await prisma.order.findUnique({ where: { id: parseInt(id) } });
+
+    if (!order) {
+      return res.status(404).json({ error: 'Заказ не найден' });
+    }
+
+    if (order.userId !== req.user.id) {
+      return res.status(403).json({ error: 'Доступ запрещен' });
+    }
+
+    // Для Telegram Stars провайдер токен должен быть пустым
+    // Цены в Telegram API указываются в минимальных единицах валюты. Для XTR 1 единица = 1 звезда.
+    // Допустим, курс 1₽ = 1 Звезда для примера (или любой другой ваш курс).
+    const starsAmount = Math.ceil(order.total);
+
+    const invoicePayload = {
+      chat_id: req.user.telegramId,
+      title: `Оплата заказа #${order.id}`,
+      description: `Оплата заказа #${order.id} в Mini App`,
+      payload: `order_${order.id}`,
+      provider_token: "", // Пусто для Telegram Stars
+      currency: "XTR",
+      prices: [{ label: "Итого", amount: starsAmount }]
+    };
+
+    const url = `https://api.telegram.org/bot${BOT_TOKEN}/createInvoiceLink`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(invoicePayload)
+    });
+
+    const data = await response.json();
+
+    if (!data.ok) {
+      console.error('[STARS] Error creating invoice:', data);
+      return res.status(500).json({ error: 'Ошибка генерации счета', details: data.description });
+    }
+
+    res.json({ invoiceLink: data.result });
+  } catch (error) {
+    console.error('[STARS] Invoice route error:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка при создании инвойса' });
+  }
+});
+
+// Роут: Подтверждение оплаты (от клиента)
+app.post('/api/orders/:id/pay', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const order = await prisma.order.findUnique({ where: { id: parseInt(id) }, include: { user: true } });
+
+    if (!order) {
+      return res.status(404).json({ error: 'Заказ не найден' });
+    }
+
+    // В реальном проекте подтверждение должно приходить через Webhook от Telegram.
+    // Здесь мы доверяем клиенту, что он успешно завершил `openInvoice` со статусом 'paid'.
+    const updated = await prisma.order.update({
+      where: { id: parseInt(id) },
+      data: { status: 'CONFIRMED' } // Автоматически подтверждаем оплаченный заказ
+    });
+
+    // Уведомление об успешной оплате
+    if (order.user && order.user.telegramId) {
+      await sendTelegramMessage(order.user.telegramId, `⭐️ <b>Заказ #${order.id} успешно оплачен Звездами!</b>\nСтатус изменен на "Подтвержден".`);
+    }
+
+    res.json(updated);
+  } catch (error) {
+    console.error('[STARS] Pay route error:', error);
+    res.status(500).json({ error: 'Ошибка подтверждения оплаты' });
+  }
+});
+
 // Роут: Обновление статуса/курьера заказа (только для админов)
 app.put('/api/orders/:id/admin', requireAuth, requireAdmin, async (req, res) => {
   try {
@@ -676,7 +828,23 @@ app.put('/api/orders/:id/admin', requireAuth, requireAdmin, async (req, res) => 
 
     const updateData = {};
     if (status) updateData.status = status;
-    if (courierId !== undefined) updateData.courierId = courierId ? parseInt(courierId) : null;
+
+    if (courierId !== undefined) {
+      if (courierId === null) {
+        updateData.courierId = null;
+      } else {
+        const cId = parseInt(courierId);
+        // Validate that this user is actually a COURIER
+        const courierUser = await prisma.user.findUnique({
+          where: { id: cId },
+          select: { role: true }
+        });
+        if (!courierUser || courierUser.role !== 'COURIER') {
+          return res.status(400).json({ error: 'Выбранный пользователь не является курьером' });
+        }
+        updateData.courierId = cId;
+      }
+    }
 
     const updated = await prisma.order.update({
       where: { id: parseInt(id) },
@@ -687,6 +855,19 @@ app.put('/api/orders/:id/admin', requireAuth, requireAdmin, async (req, res) => 
         items: { include: { product: true } }
       }
     });
+
+    // --- TELEGRAM NOTIFICATIONS ---
+    if (status && updated.user && updated.user.telegramId) {
+      let statusMsg = '';
+      if (status === 'CONFIRMED') statusMsg = `🔔 Ваш заказ #${updated.id} <b>подтвержден</b>!`;
+      else if (status === 'CANCELLED') statusMsg = `❌ Ваш заказ #${updated.id} <b>отменен</b>.`;
+
+      if (statusMsg) {
+        await sendTelegramMessage(updated.user.telegramId, statusMsg);
+      }
+    }
+    // ------------------------------
+
     res.json(updated);
   } catch (error) {
     console.error('Error updating order by admin:', error);
@@ -740,8 +921,22 @@ app.put('/api/courier/orders/:id/status', requireAuth, requireCourier, async (re
 
     const updated = await prisma.order.update({
       where: { id: parseInt(id) },
-      data: updateData
+      data: updateData,
+      include: { user: true }
     });
+
+    // --- TELEGRAM NOTIFICATIONS ---
+    if (updated.user && updated.user.telegramId) {
+      let statusMsg = '';
+      if (status === 'DELIVERING') statusMsg = `🚚 Курьер уже в пути с вашим заказом #${updated.id}!`;
+      else if (status === 'COMPLETED') statusMsg = `🎉 Ваш заказ #${updated.id} <b>доставлен</b>. Будем рады видеть вас снова!`;
+
+      if (statusMsg) {
+        await sendTelegramMessage(updated.user.telegramId, statusMsg);
+      }
+    }
+    // ------------------------------
+
     res.json(updated);
   } catch (error) {
     console.error('Error updating status:', error);

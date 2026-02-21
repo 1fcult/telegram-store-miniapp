@@ -212,7 +212,9 @@ export default function PresidentPage() {
 
     const [newShopName, setNewShopName] = useState('')
     const [newShopDesc, setNewShopDesc] = useState('')
+    const [newShopImageFile, setNewShopImageFile] = useState(null)
     const [editingShop, setEditingShop] = useState(null)
+    const [editShopImageFile, setEditShopImageFile] = useState(null)
     const [isSavingShop, setIsSavingShop] = useState(false)
 
     const [orderSearch, setOrderSearch] = useState('')
@@ -261,16 +263,36 @@ export default function PresidentPage() {
     }
 
     // ---- Shops ----
+    const uploadShopImage = async (file) => {
+        const formData = new FormData()
+        formData.append('image', file)
+        const uploadRes = await fetchWithAuth(`${API_BASE}/api/upload`, {
+            method: 'POST',
+            body: formData
+        })
+        if (uploadRes.ok) {
+            const data = await uploadRes.json()
+            return data.url
+        }
+        return null
+    }
+
     const createShop = async () => {
         if (!newShopName.trim()) return
         haptic('medium')
         setIsSavingShop(true)
+
+        let finalImageUrl = null
+        if (newShopImageFile) {
+            finalImageUrl = await uploadShopImage(newShopImageFile)
+        }
+
         const r = await fetchWithAuth(`${API_BASE}/api/shops`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: newShopName.trim(), description: newShopDesc.trim() })
+            body: JSON.stringify({ name: newShopName.trim(), description: newShopDesc.trim(), imageUrl: finalImageUrl })
         })
         setIsSavingShop(false)
-        if (r.ok) { notify('Направление создано'); setNewShopName(''); setNewShopDesc(''); fetchAll() }
+        if (r.ok) { notify('Направление создано'); setNewShopName(''); setNewShopDesc(''); setNewShopImageFile(null); fetchAll() }
         else { const e = await r.json(); notify(e.error || 'Ошибка', 'error') }
     }
 
@@ -283,11 +305,17 @@ export default function PresidentPage() {
 
     const saveShop = async () => {
         haptic('medium')
+
+        let finalImageUrl = editingShop.imageUrl
+        if (editShopImageFile) {
+            finalImageUrl = await uploadShopImage(editShopImageFile)
+        }
+
         const r = await fetchWithAuth(`${API_BASE}/api/shops/${editingShop.id}`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: editingShop.name, description: editingShop.description, status: editingShop.status })
+            body: JSON.stringify({ name: editingShop.name, description: editingShop.description, status: editingShop.status, imageUrl: finalImageUrl })
         })
-        if (r.ok) { notify('Сохранено'); setEditingShop(null); fetchAll() }
+        if (r.ok) { notify('Сохранено'); setEditingShop(null); setEditShopImageFile(null); fetchAll() }
         else { const e = await r.json(); notify(e.error || 'Ошибка', 'error') }
     }
 
@@ -507,6 +535,14 @@ export default function PresidentPage() {
                         <div className="flex flex-col gap-2">
                             <Input placeholder="Название" value={newShopName} onChange={e => setNewShopName(e.target.value)} />
                             <Input placeholder="Описание (необязательно)" value={newShopDesc} onChange={e => setNewShopDesc(e.target.value)} />
+                            <div className="flex items-center gap-2 px-1 py-1">
+                                <ImageIcon className="w-4 h-4 text-slate-500 shrink-0" />
+                                <input
+                                    type="file" accept="image/*"
+                                    className="w-full text-xs text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-white/5 file:text-slate-300 hover:file:bg-white/10 cursor-pointer"
+                                    onChange={(e) => { if (e.target.files?.[0]) setNewShopImageFile(e.target.files[0]) }}
+                                />
+                            </div>
                             <Btn onClick={createShop} disabled={isSavingShop || !newShopName.trim()}>
                                 {isSavingShop ? '...' : 'Создать'}
                             </Btn>
@@ -520,6 +556,14 @@ export default function PresidentPage() {
                                 <div className="p-4 flex flex-col gap-2">
                                     <Input value={editingShop.name} onChange={e => setEditingShop(p => ({ ...p, name: e.target.value }))} />
                                     <Input placeholder="Описание" value={editingShop.description || ''} onChange={e => setEditingShop(p => ({ ...p, description: e.target.value }))} />
+                                    <div className="flex items-center gap-2 px-1 py-1">
+                                        <ImageIcon className="w-4 h-4 text-slate-500 shrink-0" />
+                                        <input
+                                            type="file" accept="image/*"
+                                            className="w-full text-xs text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-white/5 file:text-slate-300 hover:file:bg-white/10 cursor-pointer"
+                                            onChange={(e) => { if (e.target.files?.[0]) setEditShopImageFile(e.target.files[0]) }}
+                                        />
+                                    </div>
                                     <select className="w-full rounded-2xl px-4 text-sm text-slate-200 outline-none"
                                         style={{ height: 44, background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.08)' }}
                                         value={editingShop.status} onChange={e => setEditingShop(p => ({ ...p, status: e.target.value }))}>
@@ -541,7 +585,7 @@ export default function PresidentPage() {
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         <p className="text-sm font-bold text-slate-200 truncate">{s.name}</p>
-                                        <p className="text-xs text-slate-500 truncate">{s.description || 'Нет описания'}</p>
+                                        <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-2 leading-snug">{s.description || 'Нет описания'}</p>
                                         <div className="flex items-center gap-2 mt-1">
                                             <span className="text-[10px] px-2 py-0.5 rounded-full font-medium"
                                                 style={s.status === 'ACTIVE'

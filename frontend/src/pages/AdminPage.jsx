@@ -6,12 +6,13 @@ import { useAuth } from '../context/AuthContext'
 
 export default function AdminPage() {
     const { telegramId } = useAuth()
+    // Inline Category Creation
+    const [inlineCategoryName, setInlineCategoryName] = useState('')
     const authHeaders = { 'X-Telegram-Id': telegramId }
 
     const [activeTab, setActiveTab] = useState('inventory')
     const [products, setProducts] = useState([])
     const [categories, setCategories] = useState([])
-    const [shops, setShops] = useState([])
     const [users, setUsers] = useState([])
     const [orders, setOrders] = useState([])
     const [selectedOrder, setSelectedOrder] = useState(null)
@@ -27,23 +28,17 @@ export default function AdminPage() {
 
     // Category form
     const [newCategoryName, setNewCategoryName] = useState('')
+    const [newCategoryImageFile, setNewCategoryImageFile] = useState(null)
     const [editingCategory, setEditingCategory] = useState(null)
     const [editCategoryName, setEditCategoryName] = useState('')
-
-    // Shop form
-    const [newShopName, setNewShopName] = useState('')
-    const [newShopImageFile, setNewShopImageFile] = useState(null)
-    const [editingShop, setEditingShop] = useState(null)
-    const [editShopName, setEditShopName] = useState('')
-    const [editShopImageFile, setEditShopImageFile] = useState(null)
+    const [editCategoryImageFile, setEditCategoryImageFile] = useState(null)
 
     // Delete confirmation
-    const [deleteConfirm, setDeleteConfirm] = useState(null) // { type: 'product'|'category'|'shop', id, title }
+    const [deleteConfirm, setDeleteConfirm] = useState(null) // { type: 'product'|'category', id, title }
 
     useEffect(() => {
         fetchProducts()
         fetchCategories()
-        fetchShops()
         fetchUsers()
         fetchOrders()
     }, [])
@@ -70,16 +65,6 @@ export default function AdminPage() {
             setCategories(data)
         } catch (error) {
             console.error('Failed to fetch categories', error)
-        }
-    }
-
-    const fetchShops = async () => {
-        try {
-            const res = await fetchWithAuth(`${API_BASE}/api/shops`)
-            const data = await res.json()
-            setShops(data)
-        } catch (error) {
-            console.error('Failed to fetch shops', error)
         }
     }
 
@@ -156,13 +141,11 @@ export default function AdminPage() {
     // ========== PRODUCT CRUD ==========
 
     const openCreateProduct = () => {
-        const currentNavShop = inventoryNavPath.length > 0 ? inventoryNavPath[0] : null
-        const currentNavParent = inventoryNavPath.length > 1 ? inventoryNavPath[inventoryNavPath.length - 1] : null
+        const currentNavParent = inventoryNavPath.length > 0 ? inventoryNavPath[inventoryNavPath.length - 1] : null
         setEditingProduct(null)
         setForm({
             title: '', price: '', stock: '', description: '', imageUrls: '',
             categoryId: currentNavParent ? String(currentNavParent.id) : '',
-            shopId: currentNavShop ? String(currentNavShop.id) : ''
         })
         setImageFile(null)
         setShowProductForm(true)
@@ -177,7 +160,6 @@ export default function AdminPage() {
             description: product.description || '',
             imageUrls: product.imageUrls || '',
             categoryId: product.categoryId ? String(product.categoryId) : '',
-            shopId: product.shopId ? String(product.shopId) : ''
         })
         setImageFile(null)
         setShowProductForm(true)
@@ -210,7 +192,6 @@ export default function AdminPage() {
                 description: form.description,
                 imageUrls: finalImageUrl,
                 categoryId: form.categoryId,
-                shopId: form.shopId || undefined
             })
 
             const url = editingProduct
@@ -257,26 +238,73 @@ export default function AdminPage() {
         setDeleteConfirm(null)
     }
 
+    const handleInlineCategoryCreate = async (e) => {
+        e.preventDefault()
+        if (!inlineCategoryName.trim()) {
+            notify('Введите название', 'error')
+            return
+        }
+        try {
+            const res = await fetchWithAuth(`${API_BASE}/api/categories`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...authHeaders },
+                body: JSON.stringify({ name: inlineCategoryName.trim(), parentId: null })
+            })
+            if (res.ok) {
+                const newCat = await res.json()
+                notify('Категория успешно создана!', 'success')
+                setInlineCategoryName('')
+                await fetchCategories()
+                setForm(prev => ({ ...prev, categoryId: String(newCat.id) }))
+            } else {
+                const err = await res.json()
+                notify(err.error || 'Ошибка при создании', 'error')
+            }
+        } catch (error) {
+            notify(`Ошибка: ${error.message}`, 'error')
+        }
+    }
+
     // ========== CATEGORY CRUD ==========
+
+    const uploadImage = async (file) => {
+        const formData = new FormData()
+        formData.append('image', file)
+        const uploadRes = await fetchWithAuth(`${API_BASE}/api/upload`, {
+            method: 'POST',
+            headers: { ...authHeaders },
+            body: formData
+        })
+        if (uploadRes.ok) {
+            const data = await uploadRes.json()
+            return data.url
+        }
+        return null
+    }
 
     const handleCreateCategory = async () => {
         if (!newCategoryName.trim()) return
-        const currentNavShop = inventoryNavPath.length > 0 ? inventoryNavPath[0] : null
-        const currentNavParent = inventoryNavPath.length > 1 ? inventoryNavPath[inventoryNavPath.length - 1] : null
+        const currentNavParent = inventoryNavPath.length > 0 ? inventoryNavPath[inventoryNavPath.length - 1] : null
 
         try {
+            let finalImageUrl = null
+            if (newCategoryImageFile) {
+                finalImageUrl = await uploadImage(newCategoryImageFile)
+            }
+
             const res = await fetchWithAuth(`${API_BASE}/api/categories`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', ...authHeaders },
                 body: JSON.stringify({
                     name: newCategoryName.trim(),
-                    shopId: currentNavShop ? currentNavShop.id : undefined,
+                    imageUrl: finalImageUrl,
                     parentId: currentNavParent ? currentNavParent.id : undefined
                 })
             })
             if (res.ok) {
                 notify('Категория создана!')
                 setNewCategoryName('')
+                setNewCategoryImageFile(null)
                 fetchCategories()
             }
         } catch (error) {
@@ -287,16 +315,24 @@ export default function AdminPage() {
     const handleUpdateCategory = async (id) => {
         if (!editCategoryName.trim()) return
         try {
+            const categoryToEdit = categories.find(c => c.id === id)
+            let finalImageUrl = categoryToEdit?.imageUrl
+            if (editCategoryImageFile) {
+                finalImageUrl = await uploadImage(editCategoryImageFile)
+            }
+
             const res = await fetchWithAuth(`${API_BASE}/api/categories/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', ...authHeaders },
                 body: JSON.stringify({
-                    name: editCategoryName.trim()
+                    name: editCategoryName.trim(),
+                    imageUrl: finalImageUrl !== undefined ? finalImageUrl : null
                 })
             })
             if (res.ok) {
                 notify('Категория обновлена!')
                 setEditingCategory(null)
+                setEditCategoryImageFile(null)
                 fetchCategories()
                 fetchProducts() // refresh product category labels
             }
@@ -314,92 +350,6 @@ export default function AdminPage() {
             if (res.ok) {
                 notify('Категория удалена!')
                 fetchCategories()
-            } else {
-                const err = await res.json()
-                notify(err.error || 'Ошибка удаления', 'error')
-            }
-        } catch (error) {
-            notify(`Ошибка: ${error.message}`, 'error')
-        }
-        setDeleteConfirm(null)
-    }
-
-    // ========== SHOP CRUD ==========
-
-    const uploadShopImage = async (file) => {
-        const formData = new FormData()
-        formData.append('image', file)
-        const uploadRes = await fetchWithAuth(`${API_BASE}/api/upload`, {
-            method: 'POST',
-            headers: { ...authHeaders },
-            body: formData
-        })
-        if (uploadRes.ok) {
-            const data = await uploadRes.json()
-            return data.url
-        }
-        return null
-    }
-
-    const handleCreateShop = async () => {
-        if (!newShopName.trim()) return
-        try {
-            let finalImageUrl = null
-            if (newShopImageFile) {
-                finalImageUrl = await uploadShopImage(newShopImageFile)
-            }
-
-            const res = await fetchWithAuth(`${API_BASE}/api/shops`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...authHeaders },
-                body: JSON.stringify({ name: newShopName.trim(), imageUrl: finalImageUrl })
-            })
-            if (res.ok) {
-                notify('Магазин создан!')
-                setNewShopName('')
-                setNewShopImageFile(null)
-                fetchShops()
-            }
-        } catch (error) {
-            notify(`Ошибка: ${error.message}`, 'error')
-        }
-    }
-
-    const handleUpdateShop = async (shop) => {
-        if (!editShopName.trim()) return
-        try {
-            let finalImageUrl = shop.imageUrl
-            if (editShopImageFile) {
-                finalImageUrl = await uploadShopImage(editShopImageFile)
-            }
-
-            const res = await fetchWithAuth(`${API_BASE}/api/shops/${shop.id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json', ...authHeaders },
-                body: JSON.stringify({ name: editShopName.trim(), imageUrl: finalImageUrl })
-            })
-            if (res.ok) {
-                notify('Магазин обновлен!')
-                setEditingShop(null)
-                setEditShopImageFile(null)
-                fetchShops()
-                fetchCategories()
-                fetchProducts()
-            }
-        } catch (error) {
-            notify(`Ошибка: ${error.message}`, 'error')
-        }
-    }
-
-    const handleDeleteShop = async (id) => {
-        try {
-            const res = await fetchWithAuth(`${API_BASE}/api/shops/${id}`, {
-                method: 'DELETE',
-                headers: authHeaders
-            })
-            if (res.ok) {
-                notify('Направление удалено!')
-                fetchShops()
             } else {
                 const err = await res.json()
                 notify(err.error || 'Ошибка удаления', 'error')
@@ -437,29 +387,28 @@ export default function AdminPage() {
                 </div>
             )}
 
-            {/* Tabs */}
-            <div className="flex gap-2 animate-fade-in" style={{ animationDelay: '50ms' }}>
+            {/* Nav Tabs */}
+            <div className="flex gap-2 p-1.5 glass rounded-[18px] border-white/5 mx-auto max-w-fit mt-1">
                 {[
-                    { id: 'inventory', label: 'Каталог', icon: Package, count: products.length + categories.length },
-                    { id: 'orders', label: 'Заказы', icon: ShoppingCart, count: orders.length },
-                    { id: 'shops', label: 'Направления', icon: Store, count: shops.length },
-                    { id: 'users', label: 'Сотрудники', icon: Users, count: users.length },
-                ].map(tab => (
-                    <button
-                        key={tab.id}
-                        onClick={() => setActiveTab(tab.id)}
-                        className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all duration-200 border ${activeTab === tab.id
-                            ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white border-transparent shadow-[0_2px_12px_rgba(168,85,247,0.3)]'
-                            : 'glass border-white/10 text-slate-400 hover:text-slate-200'
-                            }`}
-                    >
-                        <tab.icon className="w-4 h-4" />
-                        {tab.label}
-                        <span className={`ml-1 px-1.5 py-0.5 rounded-md text-[10px] ${activeTab === tab.id ? 'bg-white/20' : 'bg-white/5'}`}>
-                            {tab.count}
-                        </span>
-                    </button>
-                ))}
+                    { id: 'inventory', label: 'Товары', icon: Package },
+                    { id: 'orders', label: 'Заказы', icon: ShoppingCart },
+                    { id: 'users', label: 'Персонал', icon: Users }
+                ].map(tab => {
+                    const active = activeTab === tab.id
+                    return (
+                        <button
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id)}
+                            className={`flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-xl text-sm font-semibold transition-all duration-200 ${active
+                                ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-[0_2px_12px_rgba(168,85,247,0.3)]'
+                                : 'text-slate-400 hover:text-slate-200'
+                                }`}
+                        >
+                            <tab.icon className="w-4 h-4" />
+                            {tab.label}
+                        </button>
+                    )
+                })}
             </div>
 
             {/* ===== INVENTORY TAB ===== */}
@@ -530,30 +479,42 @@ export default function AdminPage() {
                         </div>
 
                         {/* Top Controls: Add Product & Add Category */}
-                        <div className="flex flex-col sm:flex-row gap-3">
-                            <button
-                                onClick={openCreateProduct}
-                                className="flex-1 flex items-center justify-center gap-2 py-3 px-4 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-semibold rounded-xl shadow-[0_3px_15px_rgba(168,85,247,0.3)] transition-all active:scale-[0.98]"
-                            >
-                                <PlusCircle className="w-4 h-4" /> Новый товар
-                            </button>
-                            <div className="flex-1 flex gap-2">
-                                <input
-                                    type="text"
-                                    className="w-full px-4 py-3 glass-input rounded-xl outline-none text-sm placeholder-slate-500"
-                                    value={newCategoryName}
-                                    onChange={(e) => setNewCategoryName(e.target.value)}
-                                    placeholder={currentNavParent ? `Подкатегория в '${currentNavParent.name}'...` : `Категория в '${currentNavShop.name}'...`}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleCreateCategory()}
-                                />
+                        <div className="flex flex-col gap-3">
+                            <div className="flex flex-col sm:flex-row gap-3">
                                 <button
-                                    onClick={handleCreateCategory}
-                                    disabled={!newCategoryName.trim()}
-                                    className="px-4 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-semibold rounded-xl transition-all active:scale-[0.98] disabled:opacity-50 text-sm shrink-0"
-                                    title="Создать категорию"
+                                    onClick={openCreateProduct}
+                                    className="flex-1 flex items-center justify-center gap-2 py-3 px-4 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-semibold rounded-xl shadow-[0_3px_15px_rgba(168,85,247,0.3)] transition-all active:scale-[0.98]"
                                 >
-                                    <Folder className="w-4 h-4" />
+                                    <PlusCircle className="w-4 h-4" /> Новый товар
                                 </button>
+                                <div className="flex-1 flex flex-col gap-2 glass p-2 rounded-xl border border-white/5">
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            className="w-full px-3 py-2 glass-input rounded-lg outline-none text-sm placeholder-slate-500"
+                                            value={newCategoryName}
+                                            onChange={(e) => setNewCategoryName(e.target.value)}
+                                            placeholder={currentNavParent ? `Подкатегория в '${currentNavParent.name}'...` : `Категория в '${currentNavShop.name}'...`}
+                                            onKeyDown={(e) => e.key === 'Enter' && handleCreateCategory()}
+                                        />
+                                        <button
+                                            onClick={handleCreateCategory}
+                                            disabled={!newCategoryName.trim()}
+                                            className="px-4 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-semibold rounded-lg transition-all active:scale-[0.98] disabled:opacity-50 text-sm shrink-0"
+                                            title="Создать категорию"
+                                        >
+                                            <Folder className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                    <div className="flex items-center gap-2 px-1">
+                                        <ImageIcon className="w-4 h-4 text-slate-500 shrink-0" />
+                                        <input
+                                            type="file" accept="image/*"
+                                            className="w-full text-xs text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-white/5 file:text-slate-300 hover:file:bg-white/10 cursor-pointer"
+                                            onChange={(e) => { if (e.target.files?.[0]) setNewCategoryImageFile(e.target.files[0]) }}
+                                        />
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -567,24 +528,37 @@ export default function AdminPage() {
                                         className="glass rounded-[16px] px-4 py-3 flex items-center gap-3 animate-fade-in opacity-0"
                                         style={{ animationDelay: `${150 + i * 40}ms`, animationFillMode: 'forwards' }}
                                     >
-                                        <Folder className="w-4 h-4 text-fuchsia-400 shrink-0" />
+                                        <div className="w-10 h-10 shrink-0 rounded-[10px] bg-slate-800/80 overflow-hidden flex items-center justify-center border border-white/5">
+                                            {c.imageUrl ? (
+                                                <img src={c.imageUrl} alt={c.name} className="w-full h-full object-cover" />
+                                            ) : (
+                                                <Folder className="w-4 h-4 text-fuchsia-400" />
+                                            )}
+                                        </div>
 
                                         {editingCategory === c.id ? (
-                                            <div className="flex-1 flex gap-2">
+                                            <div className="flex-1 flex flex-col gap-2">
+                                                <div className="flex gap-2">
+                                                    <input
+                                                        type="text"
+                                                        className="flex-1 px-3 py-1.5 glass-input rounded-lg outline-none text-sm"
+                                                        value={editCategoryName}
+                                                        onChange={(e) => setEditCategoryName(e.target.value)}
+                                                        onKeyDown={(e) => e.key === 'Enter' && handleUpdateCategory(c.id)}
+                                                        autoFocus
+                                                    />
+                                                    <button onClick={() => handleUpdateCategory(c.id)} className="px-3 py-1.5 bg-violet-600/30 text-violet-300 rounded-lg text-xs font-medium hover:bg-violet-600/50 transition-colors">
+                                                        Ок
+                                                    </button>
+                                                    <button onClick={() => setEditingCategory(null)} className="px-2 py-1.5 text-slate-500 hover:text-slate-300 transition-colors">
+                                                        <X className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
                                                 <input
-                                                    type="text"
-                                                    className="flex-1 px-3 py-1.5 glass-input rounded-lg outline-none text-sm"
-                                                    value={editCategoryName}
-                                                    onChange={(e) => setEditCategoryName(e.target.value)}
-                                                    onKeyDown={(e) => e.key === 'Enter' && handleUpdateCategory(c.id)}
-                                                    autoFocus
+                                                    type="file" accept="image/*"
+                                                    className="text-xs text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-white/5 file:text-slate-300 hover:file:bg-white/10 cursor-pointer"
+                                                    onChange={(e) => { if (e.target.files?.[0]) setEditCategoryImageFile(e.target.files[0]) }}
                                                 />
-                                                <button onClick={() => handleUpdateCategory(c.id)} className="px-3 py-1.5 bg-violet-600/30 text-violet-300 rounded-lg text-xs font-medium hover:bg-violet-600/50 transition-colors">
-                                                    Ок
-                                                </button>
-                                                <button onClick={() => setEditingCategory(null)} className="px-2 py-1.5 text-slate-500 hover:text-slate-300 transition-colors">
-                                                    <X className="w-3.5 h-3.5" />
-                                                </button>
                                             </div>
                                         ) : (
                                             <>
@@ -737,16 +711,42 @@ export default function AdminPage() {
                                 <label className="text-xs font-semibold tracking-wider text-slate-400 uppercase ml-1 flex items-center gap-2">
                                     <Folder className="w-3 h-3" /> Категория
                                 </label>
-                                <select
-                                    className="w-full px-4 py-3 glass-input rounded-xl outline-none text-sm text-slate-100 appearance-none cursor-pointer"
-                                    value={form.categoryId}
-                                    onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
-                                >
-                                    <option value="" className="text-slate-800 bg-slate-100/90">Без категории</option>
-                                    {categories.filter(c => form.shopId ? String(c.shopId) === String(form.shopId) : true).map(c => (
-                                        <option key={c.id} value={String(c.id)} className="text-slate-800 bg-slate-100/90">{c.name}</option>
-                                    ))}
-                                </select>
+                                <div className="flex gap-2">
+                                    <select
+                                        className="flex-1 px-4 py-3 glass-input rounded-xl outline-none text-sm text-slate-100 appearance-none cursor-pointer"
+                                        value={form.categoryId}
+                                        onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
+                                    >
+                                        <option value="" className="text-slate-800 bg-slate-100/90">Без категории</option>
+                                        {categories.filter(c => form.shopId ? String(c.shopId) === String(form.shopId) : true).map(c => (
+                                            <option key={c.id} value={String(c.id)} className="text-slate-800 bg-slate-100/90">{c.name}</option>
+                                        ))}
+                                    </select>
+                                    <div className="flex gap-1 shrink-0 bg-white/5 rounded-xl p-1 border border-white/5 items-center">
+                                        <input
+                                            type="text"
+                                            placeholder="Новая..."
+                                            className="w-24 px-2 py-1 glass-input rounded-lg outline-none text-xs"
+                                            value={inlineCategoryName}
+                                            onChange={e => setInlineCategoryName(e.target.value)}
+                                            onKeyDown={e => {
+                                                if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    handleInlineCategoryCreate(e);
+                                                }
+                                            }}
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={handleInlineCategoryCreate}
+                                            disabled={!inlineCategoryName.trim() || !form.shopId}
+                                            className="p-1.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-white disabled:opacity-50 transition-colors"
+                                            title="Добавить категорию (нужно выбрать магазин)"
+                                        >
+                                            <PlusCircle className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
 
                             <div className="space-y-1.5">
@@ -813,111 +813,7 @@ export default function AdminPage() {
                 </div>
             )}
 
-            {/* ===== SHOPS TAB ===== */}
-            {activeTab === 'shops' && (
-                <div className="flex flex-col gap-3 animate-fade-in" style={{ animationDelay: '100ms' }}>
-                    <div className="glass rounded-[20px] p-4 flex gap-2">
-                        <input
-                            type="text"
-                            placeholder="Новое направление..."
-                            className="flex-1 px-4 py-3 glass-input rounded-xl outline-none text-sm placeholder-slate-500"
-                            value={newShopName}
-                            onChange={(e) => setNewShopName(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleCreateShop()}
-                        />
-                        <label className={`cursor-pointer px-4 py-3 glass border-white/10 rounded-xl transition-all flex items-center justify-center ${newShopImageFile ? 'text-fuchsia-400 border-fuchsia-500/50 bg-fuchsia-500/10' : 'text-slate-400 hover:text-fuchsia-400 hover:border-fuchsia-500/30'}`}>
-                            <input
-                                type="file"
-                                accept="image/*"
-                                className="hidden"
-                                onChange={(e) => { if (e.target.files?.[0]) setNewShopImageFile(e.target.files[0]) }}
-                            />
-                            <ImageIcon className="w-4 h-4" />
-                        </label>
-                        <button
-                            onClick={handleCreateShop}
-                            disabled={!newShopName.trim()}
-                            className="px-4 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-semibold rounded-xl transition-all active:scale-[0.98] disabled:opacity-50 whitespace-nowrap text-sm"
-                        >
-                            <PlusCircle className="w-4 h-4" />
-                        </button>
-                    </div>
-
-                    {/* Shops list */}
-                    {shops.map((s, i) => (
-                        <div
-                            key={s.id}
-                            className="glass rounded-[16px] px-4 py-3 flex items-center gap-3 animate-fade-in opacity-0"
-                            style={{ animationDelay: `${150 + i * 40}ms`, animationFillMode: 'forwards' }}
-                        >
-                            <Store className="w-4 h-4 text-fuchsia-400 shrink-0" />
-
-                            {editingShop === s.id ? (
-                                <div className="flex-1 flex gap-2">
-                                    <input
-                                        type="text"
-                                        className="flex-1 px-3 py-1.5 glass-input rounded-lg outline-none text-sm"
-                                        value={editShopName}
-                                        onChange={(e) => setEditShopName(e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && handleUpdateShop(s)}
-                                        autoFocus
-                                    />
-                                    <label className={`cursor-pointer px-3 py-1.5 glass border-white/10 rounded-lg transition-all flex items-center justify-center ${editShopImageFile || s.imageUrl ? 'text-violet-400 border-violet-500/50 bg-violet-500/10' : 'text-slate-400 hover:text-violet-400'}`}>
-                                        <input
-                                            type="file"
-                                            accept="image/*"
-                                            className="hidden"
-                                            onChange={(e) => { if (e.target.files?.[0]) setEditShopImageFile(e.target.files[0]) }}
-                                        />
-                                        <ImageIcon className="w-3.5 h-3.5" />
-                                    </label>
-                                    <button onClick={() => handleUpdateShop(s)} className="px-3 py-1.5 bg-violet-600/30 text-violet-300 rounded-lg text-xs font-medium hover:bg-violet-600/50 transition-colors">
-                                        Ок
-                                    </button>
-                                    <button onClick={() => { setEditingShop(null); setEditShopImageFile(null) }} className="px-2 py-1.5 text-slate-500 hover:text-slate-300 transition-colors">
-                                        <X className="w-3.5 h-3.5" />
-                                    </button>
-                                </div>
-                            ) : (
-                                <>
-                                    <div className="flex-1 flex gap-3 items-center">
-                                        {s.imageUrl && (
-                                            <div className="w-8 h-8 rounded-lg overflow-hidden glass border border-white/5 shrink-0 flex items-center justify-center bg-black/50 p-1">
-                                                <img src={s.imageUrl} alt={s.name} className="w-full h-full object-contain" />
-                                            </div>
-                                        )}
-                                        <span className="text-sm text-slate-200 font-medium">{s.name}</span>
-                                    </div>
-                                    <div className="flex items-center gap-1">
-                                        <button
-                                            onClick={() => {
-                                                setEditingShop(s.id);
-                                                setEditShopName(s.name);
-                                                setEditShopImageFile(null);
-                                            }}
-                                            className="p-1.5 rounded-lg text-slate-500 hover:text-violet-400 transition-colors"
-                                        >
-                                            <Pencil className="w-3.5 h-3.5" />
-                                        </button>
-                                        <button
-                                            onClick={() => setDeleteConfirm({ type: 'shop', id: s.id, title: s.name })}
-                                            className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 transition-colors"
-                                        >
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                    </div>
-                                </>
-                            )}
-                        </div>
-                    ))}
-
-                    {shops.length === 0 && (
-                        <div className="py-10 text-center text-slate-500 glass rounded-[20px] border-dashed border-2 border-white/5">
-                            Направлений пока нет.
-                        </div>
-                    )}
-                </div>
-            )}
+            {/* ===== SHOPS TAB REMOVED FOR ADMIN ===== */}
 
             {/* ===== ORDERS TAB ===== */}
             {activeTab === 'orders' && (
@@ -932,9 +828,9 @@ export default function AdminPage() {
                             <div className="flex items-center justify-between border-b border-white/5 pb-3">
                                 <div className="flex items-center gap-3">
                                     <div className={`p-2 rounded-xl text-white ${o.status === 'PENDING' ? 'bg-orange-500/20 border border-orange-500/30 text-orange-400' :
-                                            o.status === 'DELIVERING' ? 'bg-blue-500/20 border border-blue-500/30 text-blue-400' :
-                                                o.status === 'COMPLETED' ? 'bg-green-500/20 border border-green-500/30 text-green-400' :
-                                                    'bg-slate-500/20 border border-slate-500/30'
+                                        o.status === 'DELIVERING' ? 'bg-blue-500/20 border border-blue-500/30 text-blue-400' :
+                                            o.status === 'COMPLETED' ? 'bg-green-500/20 border border-green-500/30 text-green-400' :
+                                                'bg-slate-500/20 border border-slate-500/30'
                                         }`}>
                                         <Package className="w-5 h-5" />
                                     </div>
@@ -1057,7 +953,6 @@ export default function AdminPage() {
                                     onClick={() => {
                                         if (deleteConfirm.type === 'product') handleDeleteProduct(deleteConfirm.id)
                                         else if (deleteConfirm.type === 'category') handleDeleteCategory(deleteConfirm.id)
-                                        else if (deleteConfirm.type === 'shop') handleDeleteShop(deleteConfirm.id)
                                     }}
                                     className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-medium text-sm transition-colors"
                                 >
@@ -1173,3 +1068,4 @@ export default function AdminPage() {
         </div>
     )
 }
+

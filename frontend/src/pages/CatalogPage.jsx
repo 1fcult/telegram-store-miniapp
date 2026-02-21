@@ -18,9 +18,22 @@ export default function CatalogPage() {
     const [selectedProduct, setSelectedProduct] = useState(null)
     const [isLoading, setIsLoading] = useState(true)
 
+    // Animation states
+    const [animatingButtons, setAnimatingButtons] = useState({})
+    const [floatingPlus, setFloatingPlus] = useState([])
+    const [cartBump, setCartBump] = useState(false)
+
     useEffect(() => {
         Promise.all([fetchProducts(), fetchCategories(), fetchShops()]).finally(() => setIsLoading(false))
     }, [])
+
+    useEffect(() => {
+        if (totalItems > 0) {
+            setCartBump(true)
+            const t = setTimeout(() => setCartBump(false), 400)
+            return () => clearTimeout(t)
+        }
+    }, [totalItems])
 
     const fetchProducts = async () => {
         try {
@@ -156,7 +169,10 @@ export default function CatalogPage() {
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         <h3 className="text-base font-bold text-slate-200 group-hover:text-fuchsia-300 transition-colors truncate">{shop.name}</h3>
-                                        <p className="text-slate-500 text-xs mt-0.5">{categories.filter(c => c.shopId === shop.id).length} категорий</p>
+                                        {shop.description && (
+                                            <p className="text-[11px] text-slate-400 mt-1 line-clamp-2 leading-snug">{shop.description}</p>
+                                        )}
+                                        <p className="text-slate-500 text-[10px] mt-1.5 font-medium uppercase tracking-wider">{categories.filter(c => c.shopId === shop.id).length} категорий</p>
                                     </div>
                                     <ChevronRight className="w-5 h-5 text-slate-500 group-hover:text-fuchsia-400 group-hover:translate-x-1 transition-all shrink-0" />
                                 </div>
@@ -270,19 +286,37 @@ export default function CatalogPage() {
                                         {/* Info */}
                                         <div className="p-3 flex flex-col flex-1">
                                             <h3 className="font-semibold text-slate-200 text-[13px] line-clamp-2 leading-tight flex-1 group-hover:text-white transition-colors">{p.title}</h3>
-                                            <div className="mt-3 flex items-center justify-between shrink-0">
+                                            <div className="mt-3 flex items-center justify-between shrink-0 relative">
                                                 <span className="text-[15px] font-bold bg-clip-text text-transparent bg-gradient-to-r from-violet-400 to-fuchsia-400">
                                                     {p.price.toLocaleString('ru-RU')} ₽
                                                 </span>
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); addToCart(p) }}
-                                                    className={`p-1.5 rounded-[10px] transition-all ${isInCart(p.id)
-                                                        ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-                                                        : 'glass border-white/10 text-slate-400 hover:text-white hover:bg-gradient-to-r hover:from-violet-600 hover:to-fuchsia-600 hover:border-transparent hover:shadow-[0_2px_10px_rgba(168,85,247,0.3)] shadow-sm'
-                                                        }`}
-                                                >
-                                                    {isInCart(p.id) ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                                                </button>
+                                                <div className="relative">
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            addToCart(p);
+                                                            setAnimatingButtons(prev => ({ ...prev, [p.id]: true }));
+                                                            setFloatingPlus(prev => [...prev, { id: Math.random(), productId: p.id }]);
+                                                            setTimeout(() => setAnimatingButtons(prev => ({ ...prev, [p.id]: false })), 300);
+                                                        }}
+                                                        className={`p-1.5 rounded-[10px] transition-all relative ${isInCart(p.id)
+                                                            ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                                                            : 'glass border-white/10 text-slate-400 hover:text-white hover:bg-gradient-to-r hover:from-violet-600 hover:to-fuchsia-600 hover:border-transparent hover:shadow-[0_2px_10px_rgba(168,85,247,0.3)] shadow-sm'
+                                                            } ${animatingButtons[p.id] ? 'animate-pop' : ''}`}
+                                                    >
+                                                        {isInCart(p.id) ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                                                    </button>
+                                                    {/* Floating +1 animation */}
+                                                    {floatingPlus.filter(f => f.productId === p.id).map(f => (
+                                                        <span
+                                                            key={f.id}
+                                                            className="absolute bottom-full right-0 mb-1 pointer-events-none text-fuchsia-400 font-bold text-[11px] animate-float-up z-20"
+                                                            onAnimationEnd={() => setFloatingPlus(prev => prev.filter(item => item.id !== f.id))}
+                                                        >
+                                                            +1
+                                                        </span>
+                                                    ))}
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -360,11 +394,15 @@ export default function CatalogPage() {
                                     </div>
                                 </div>
                                 <button
-                                    onClick={() => addToCart(selectedProduct)}
+                                    onClick={() => {
+                                        addToCart(selectedProduct);
+                                        setAnimatingButtons(prev => ({ ...prev, [`modal_${selectedProduct.id}`]: true }));
+                                        setTimeout(() => setAnimatingButtons(prev => ({ ...prev, [`modal_${selectedProduct.id}`]: false })), 300);
+                                    }}
                                     className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all active:scale-[0.97] ${isInCart(selectedProduct.id)
                                         ? 'bg-green-500/20 text-green-400 border border-green-500/30'
                                         : 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-[0_3px_15px_rgba(168,85,247,0.3)]'
-                                        }`}
+                                        } ${animatingButtons[`modal_${selectedProduct.id}`] ? 'animate-pop' : ''}`}
                                 >
                                     {isInCart(selectedProduct.id) ? (
                                         <><Check className="w-4 h-4" /> В корзине</>
@@ -381,7 +419,7 @@ export default function CatalogPage() {
             {totalItems > 0 && (
                 <Link
                     to="/cart"
-                    className="fixed bottom-6 right-4 z-40 flex items-center gap-2 px-5 py-3.5 text-white font-bold rounded-2xl press-scale animate-fade-in-scale"
+                    className={`fixed bottom-6 right-4 z-40 flex items-center gap-2 px-5 py-3.5 text-white font-bold rounded-2xl press-scale animate-fade-in-scale ${cartBump ? 'animate-bump' : ''}`}
                     style={{
                         background: 'linear-gradient(135deg, #7c3aed, #db2777)',
                         boxShadow: '0 8px 32px rgba(124,58,237,0.5), 0 2px 8px rgba(0,0,0,0.3)',

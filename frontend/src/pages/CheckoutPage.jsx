@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowLeft, CreditCard, Banknote, Bitcoin, Gem, Hexagon, Truck, Store, Package, MapPin, CheckCircle2, ShoppingBag } from 'lucide-react'
+import { ArrowLeft, CreditCard, Banknote, Bitcoin, Gem, Hexagon, Truck, Store, Package, MapPin, CheckCircle2, ShoppingBag, Star } from 'lucide-react'
 import { useCart } from '../context/CartContext'
 import { useAuth } from '../context/AuthContext'
 import { API_BASE, fetchWithAuth } from '../api'
 
 const PAYMENT_METHODS = [
-    { id: 'CARD', label: 'Картой', sublabel: 'Telegram Payments', icon: CreditCard, color: 'from-blue-500 to-cyan-500' },
+    { id: 'STARS', label: 'Telegram Stars ⭐️', sublabel: 'Нативная оплата', icon: Star, color: 'from-amber-400 to-orange-500' },
     { id: 'CASH', label: 'При получении', sublabel: 'Наличные', icon: Banknote, color: 'from-green-500 to-emerald-500' },
     { id: 'BITCOIN', label: 'Bitcoin', sublabel: 'BTC', icon: Bitcoin, color: 'from-orange-500 to-amber-500' },
     { id: 'TON', label: 'TON', sublabel: 'Toncoin', icon: Gem, color: 'from-blue-400 to-sky-400' },
@@ -75,8 +75,36 @@ export default function CheckoutPage() {
 
             if (res.ok) {
                 const order = await res.json()
-                setOrderSuccess(order)
-                clearCart()
+
+                if (paymentMethod === 'STARS' && window.Telegram?.WebApp?.openInvoice) {
+                    try {
+                        const invRes = await fetchWithAuth(`${API_BASE}/api/orders/${order.id}/invoice`, { method: 'POST' })
+                        if (invRes.ok) {
+                            const { invoiceLink } = await invRes.json()
+                            window.Telegram.WebApp.openInvoice(invoiceLink, async (status) => {
+                                if (status === 'paid') {
+                                    await fetchWithAuth(`${API_BASE}/api/orders/${order.id}/pay`, { method: 'POST' })
+                                } else {
+                                    alert('Оплата прервана. Заказ создан, но ожидает оплаты.')
+                                }
+                                setOrderSuccess(order)
+                                clearCart()
+                            })
+                        } else {
+                            const err = await invRes.json()
+                            alert(err.error || 'Ошибка генерации счета Telegram Stars')
+                            setOrderSuccess(order)
+                            clearCart()
+                        }
+                    } catch (err) {
+                        alert('Сетевая ошибка при открытии счета')
+                        setOrderSuccess(order)
+                        clearCart()
+                    }
+                } else {
+                    setOrderSuccess(order)
+                    clearCart()
+                }
             } else {
                 const err = await res.json()
                 alert(err.error || 'Ошибка оформления заказа')
@@ -91,46 +119,63 @@ export default function CheckoutPage() {
     // ===== SUCCESS SCREEN =====
     if (orderSuccess) {
         return (
-            <div className="w-full max-w-2xl mx-auto flex flex-col items-center justify-center min-h-[70vh] gap-5 animate-fade-in">
-                <div className="p-5 rounded-3xl bg-green-500/10 border border-green-500/20 animate-slide-up">
-                    <CheckCircle2 className="w-14 h-14 text-green-400" />
+            <div className="w-full max-w-2xl mx-auto flex flex-col items-center justify-center min-h-[70vh] gap-5 px-4 animate-fade-in">
+                {/* Animated Success Icon */}
+                <div className="relative mb-4">
+                    <div className="absolute inset-0 bg-green-500/20 blur-xl rounded-full animate-pulse-glow" />
+                    <div className="relative flex items-center justify-center w-24 h-24 rounded-full bg-gradient-to-br from-green-400/20 to-emerald-600/20 border border-green-500/30 animate-success-pop">
+                        <CheckCircle2 className="w-12 h-12 text-green-400 drop-shadow-[0_0_15px_rgba(74,222,128,0.5)]" />
+                    </div>
                 </div>
-                <h1 className="text-2xl font-extrabold text-slate-100">Заказ оформлен!</h1>
-                <p className="text-slate-400 text-sm text-center max-w-xs">
-                    Заказ #{orderSuccess.id} создан. {deliveryMethod === 'PICKUP' ? 'Ожидайте уведомления о готовности к выдаче.' : 'Мы свяжемся с вами для подтверждения.'}
-                </p>
 
-                <div className="glass rounded-[20px] p-4 w-full max-w-sm space-y-2 text-sm">
-                    <div className="flex justify-between text-slate-400">
-                        <span>Заказ</span>
-                        <span className="text-slate-200 font-bold">#{orderSuccess.id}</span>
+                <div className="text-center space-y-2 animate-slide-up" style={{ animationDelay: '200ms', opacity: 0, animationFillMode: 'forwards' }}>
+                    <h1 className="text-3xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-green-400 to-emerald-300">
+                        Ура, заказ оформлен! 🎉
+                    </h1>
+                    <p className="text-slate-400 text-sm max-w-xs mx-auto">
+                        Мы получили ваш заказ #{orderSuccess.id}. {deliveryMethod === 'PICKUP' ? 'Ожидайте уведомления о готовности к выдаче.' : 'Скоро мы свяжемся с вами.'}
+                    </p>
+                </div>
+
+                <div className="mt-6 w-full max-w-sm glass rounded-[24px] p-5 space-y-3 text-sm animate-slide-up" style={{ animationDelay: '400ms', opacity: 0, animationFillMode: 'forwards' }}>
+                    <div className="flex items-center gap-3 pb-3 border-b border-white/5">
+                        <div className="w-10 h-10 rounded-xl bg-violet-500/10 flex items-center justify-center border border-violet-500/20">
+                            <Package className="w-5 h-5 text-violet-400" />
+                        </div>
+                        <div>
+                            <div className="text-slate-500 text-xs font-semibold uppercase tracking-wider">Номер заказа</div>
+                            <div className="text-slate-200 font-bold text-base">#{orderSuccess.id}</div>
+                        </div>
                     </div>
-                    <div className="flex justify-between text-slate-400">
-                        <span>Сумма</span>
-                        <span className="text-slate-200 font-bold">{orderSuccess.total.toLocaleString('ru-RU')} ₽</span>
+
+                    <div className="flex justify-between items-center py-1 text-slate-400">
+                        <span>Сумма заказа</span>
+                        <span className="text-slate-200 font-bold text-base bg-clip-text text-transparent bg-gradient-to-r from-violet-400 to-fuchsia-400">
+                            {orderSuccess.total.toLocaleString('ru-RU')} ₽
+                        </span>
                     </div>
-                    <div className="flex justify-between text-slate-400">
+                    <div className="flex justify-between items-center py-1 text-slate-400">
                         <span>Оплата</span>
                         <span className="text-slate-200">{PAYMENT_METHODS.find(p => p.id === orderSuccess.paymentMethod)?.label}</span>
                     </div>
-                    <div className="flex justify-between text-slate-400">
+                    <div className="flex justify-between items-center py-1 text-slate-400">
                         <span>Доставка</span>
                         <span className="text-slate-200">{DELIVERY_METHODS.find(d => d.id === orderSuccess.deliveryMethod)?.label}</span>
                     </div>
                     {orderSuccess.address && (
-                        <div className="flex justify-between text-slate-400">
-                            <span>Адрес</span>
-                            <span className="text-slate-200 text-right max-w-[60%]">{orderSuccess.address}</span>
+                        <div className="flex justify-between items-start pt-1 text-slate-400 border-t border-white/5 mt-2">
+                            <span className="mt-2">Адрес</span>
+                            <span className="text-slate-200 text-right max-w-[60%] mt-2 leading-tight">{orderSuccess.address}</span>
                         </div>
                     )}
                 </div>
 
-                <div className="flex gap-3 mt-2">
+                <div className="mt-8 animate-slide-up" style={{ animationDelay: '600ms', opacity: 0, animationFillMode: 'forwards' }}>
                     <Link
                         to="/"
-                        className="px-6 py-2.5 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white font-semibold rounded-xl text-sm transition-all hover:from-violet-500 hover:to-fuchsia-500"
+                        className="inline-flex items-center gap-2 px-8 py-3.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-semibold rounded-2xl transition-all active:scale-[0.98] shadow-lg hover:shadow-white/5"
                     >
-                        В каталог
+                        <ArrowLeft className="w-4 h-4" /> Вернуться в магазин
                     </Link>
                 </div>
             </div>

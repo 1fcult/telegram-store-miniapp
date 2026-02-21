@@ -1,6 +1,7 @@
 import { Routes, Route } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { CartProvider } from './context/CartContext'
+import { useTelegramBackButton } from './hooks/useTelegramBackButton'
 import CatalogPage from './pages/CatalogPage'
 import AdminPage from './pages/AdminPage'
 import PresidentPage from './pages/PresidentPage'
@@ -11,6 +12,7 @@ import CourierPage from './pages/CourierPage'
 import { Shield, Loader2, Truck, Bot, Crown } from 'lucide-react'
 
 function AppRoutes() {
+  useTelegramBackButton()
   const { user, isLoading, isAdmin, isCourier, isPresident, authError } = useAuth()
 
   if (isLoading) {
