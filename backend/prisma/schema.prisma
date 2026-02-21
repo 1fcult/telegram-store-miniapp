@@ -1,0 +1,85 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  telegramId String  @unique
+  name      String?
+  username  String?
+  role      String   @default("CLIENT") // CLIENT, ADMIN, COURIER
+  orders    Order[]  @relation("UserOrders")
+  deliveries Order[] @relation("CourierOrders")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Shop {
+  id          Int        @id @default(autoincrement())
+  name        String     @unique
+  description String?
+  imageUrl    String?
+  status      String     @default("ACTIVE") // ACTIVE, INACTIVE
+  categories  Category[]
+  products    Product[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model Category {
+  id        Int       @id @default(autoincrement())
+  name      String
+  shopId    Int?
+  shop      Shop?     @relation(fields: [shopId], references: [id])
+  parentId  Int?
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Product {
+  id          Int         @id @default(autoincrement())
+  title       String
+  description String?
+  price       Float
+  stock       Int         @default(0)
+  imageUrls   String?
+  shopId      Int?
+  shop        Shop?       @relation(fields: [shopId], references: [id])
+  categoryId  Int?
+  category    Category?   @relation(fields: [categoryId], references: [id])
+  orderItems  OrderItem[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+model Order {
+  id              Int         @id @default(autoincrement())
+  userId          Int
+  user            User        @relation("UserOrders", fields: [userId], references: [id])
+  courierId       Int?
+  courier         User?       @relation("CourierOrders", fields: [courierId], references: [id])
+  status          String      @default("PENDING") // PENDING, CONFIRMED, DELIVERING, COMPLETED, CANCELLED
+  paymentMethod   String      // CARD, CASH, BITCOIN, TON, ETHEREUM
+  deliveryMethod  String      // COURIER, PICKUP, POST
+  address         String?
+  total           Float
+  items           OrderItem[]
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+}
+
+model OrderItem {
+  id        Int     @id @default(autoincrement())
+  orderId   Int
+  order     Order   @relation(fields: [orderId], references: [id])
+  productId Int
+  product   Product @relation(fields: [productId], references: [id])
+  quantity  Int
+  price     Float
+}

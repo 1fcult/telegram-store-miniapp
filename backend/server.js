@@ -1,0 +1,666 @@
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const crypto = require('crypto');
+const { PrismaClient } = require('@prisma/client');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+
+const prisma = new PrismaClient();
+const app = express();
+const PORT = process.env.PORT || 3000;
+const BOT_TOKEN = process.env.BOT_TOKEN || '';
+const DEV_MODE = process.env.DEV_MODE === 'true';
+
+// Убедимся, что папка uploads существует
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir);
+}
+
+// Настройка Multer
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, 'uploads/')
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9)
+    cb(null, uniqueSuffix + path.extname(file.originalname))
+  }
+})
+const upload = multer({ storage: storage })
+
+app.use(cors());
+app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// ==========================================
+// TELEGRAM AUTH
+// ==========================================
+
+// Валидация initData от Telegram
+function validateInitData(initData) {
+  if (!initData) return null;
+
+  const params = new URLSearchParams(initData);
+  const hash = params.get('hash');
+  if (!hash) return null;
+
+  // Собираем строку для проверки
+  params.delete('hash');
+  const dataCheckArr = [];
+  params.sort();
+  params.forEach((value, key) => {
+    dataCheckArr.push(`${key}=${value}`);
+  });
+  const dataCheckString = dataCheckArr.join('\n');
+
+  // HMAC-SHA256 проверка
+  const secretKey = crypto.createHmac('sha256', 'WebAppData').update(BOT_TOKEN).digest();
+  const calculatedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+
+  if (calculatedHash !== hash) {
+    console.warn('[AUTH] Invalid initData hash');
+    return null;
+  }
+
+  // Извлекаем данные пользователя
+  const userParam = params.get('user');
+  if (!userParam) return null;
+
+  try {
+    return JSON.parse(userParam);
+  } catch {
+    return null;
+  }
+}
+
+// Роут: Авторизация через Telegram
+app.post('/api/auth', async (req, res) => {
+  const { initData } = req.body;
+
+  // DEV_MODE — позволяет войти без Telegram
+  if (DEV_MODE && !initData) {
+    console.log('[AUTH] DEV_MODE: Creating dev user');
+    const devUser = await prisma.user.upsert({
+      where: { telegramId: 'dev_admin' },
+      update: { name: 'Dev Admin', username: 'dev_admin' },
+      create: {
+        telegramId: 'dev_admin',
+        name: 'Dev Admin',
+        username: 'dev_admin',
+        role: 'ADMIN'
+      }
+    });
+    return res.json({ user: devUser });
+  }
+
+  // Проверяем initData
+  const telegramUser = validateInitData(initData);
+  if (!telegramUser) {
+    return res.status(401).json({ error: 'Invalid Telegram data' });
+  }
+
+  console.log(`[AUTH] Authenticated Telegram user: ${telegramUser.id} (${telegramUser.first_name})`);
+
+  // Создаём или обновляем пользователя
+  const user = await prisma.user.upsert({
+    where: { telegramId: String(telegramUser.id) },
+    update: {
+      name: [telegramUser.first_name, telegramUser.last_name].filter(Boolean).join(' '),
+      username: telegramUser.username || null,
+    },
+    create: {
+      telegramId: String(telegramUser.id),
+      name: [telegramUser.first_name, telegramUser.last_name].filter(Boolean).join(' '),
+      username: telegramUser.username || null,
+      role: 'CLIENT'
+    }
+  });
+
+  res.json({ user });
+});
+
+// Middleware: Проверка авторизации (Universal)
+async function requireAuth(req, res, next) {
+  // DEV_MODE — создаём/находим реального пользователя
+  // if (DEV_MODE) {
+  //   let user = await prisma.user.findUnique({ where: { telegramId: 'dev_admin' } });
+  //   if (!user) {
+  //     user = await prisma.user.create({ data: { telegramId: 'dev_admin', name: 'Dev Admin', role: 'ADMIN' } });
+  //   }
+  //   req.user = user;
+  //   return next();
+  // }
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('tma ')) {
+    // Fallback to old x-telegram-id for backward compatibility during transition
+    const telegramId = req.headers['x-telegram-id'];
+    if (!telegramId) {
+      return res.status(401).json({ error: 'Unauthorized: Missing Authorization header' });
+    }
+    const user = await prisma.user.findUnique({ where: { telegramId } });
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized: User not found' });
+    }
+    req.user = user;
+    return next();
+  }
+
+  const initData = authHeader.substring(4); // Remove 'tma '
+  const telegramUser = validateInitData(initData);
+
+  if (!telegramUser) {
+    return res.status(401).json({ error: 'Unauthorized: Invalid Telegram data signature' });
+  }
+
+  const user = await prisma.user.findUnique({ where: { telegramId: String(telegramUser.id) } });
+
+  if (!user) {
+    // If user doesn't exist yet but passed auth, we might want to create them
+    // For now, let's just reject if they haven't called /api/auth first
+    return res.status(401).json({ error: 'Unauthorized: User not found in database' });
+  }
+
+  req.user = user;
+  next();
+}
+
+// Middleware: Проверка роли ADMIN
+function requireAdmin(req, res, next) {
+  // ВРЕМЕННО пропускаем всех для тестирования
+  return next();
+  /*
+  if (DEV_MODE) return next();
+  if (!req.user || req.user.role !== 'ADMIN') {
+    return res.status(403).json({ error: 'Access denied: Requires ADMIN role' });
+  }
+  next();
+  */
+}
+
+// Middleware: Проверка роли COURIER
+function requireCourier(req, res, next) {
+  // ВРЕМЕННО пропускаем всех для тестирования
+  return next();
+  /*
+  if (DEV_MODE) return next();
+  if (!req.user || (req.user.role !== 'COURIER' && req.user.role !== 'ADMIN')) {
+    return res.status(403).json({ error: 'Access denied: Requires COURIER role' });
+  }
+  next();
+  */
+}
+
+// ==========================================
+// API ROUTES
+// ==========================================
+
+// Контроллер здоровья
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', message: 'Backend is running', devMode: DEV_MODE });
+});
+
+// ==========================================
+// USERS
+// ==========================================
+
+// Роут: Получение пользователей (только для админов)
+app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(users);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Ошибка получения пользователей' });
+  }
+});
+
+// Роут: Обновление роли пользователя (только для админов)
+app.put('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { role } = req.body;
+    if (!['CLIENT', 'ADMIN', 'COURIER'].includes(role)) {
+      return res.status(400).json({ error: 'Недопустимая роль' });
+    }
+    const updated = await prisma.user.update({
+      where: { id: parseInt(id) },
+      data: { role }
+    });
+    res.json(updated);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Ошибка обновления роли пользователя' });
+  }
+});
+
+// Роут: Загрузка изображения (только для админов)
+app.post('/api/upload', requireAuth, requireAdmin, upload.single('image'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+  const imageUrl = `http://localhost:${PORT}/uploads/${req.file.filename}`;
+  res.json({ url: imageUrl });
+});
+// ==========================================
+// SHOPS
+// ==========================================
+
+// Роут: Получение магазинов
+app.get('/api/shops', async (req, res) => {
+  try {
+    const shops = await prisma.shop.findMany();
+    res.json(shops);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Ошибка получения магазинов' });
+  }
+});
+
+// Роут: Создание магазина (только для админов)
+app.post('/api/shops', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { name, description, imageUrl, status } = req.body;
+    if (!name) return res.status(400).json({ error: 'Name is required' });
+    const newShop = await prisma.shop.create({
+      data: { name, description: description || null, imageUrl: imageUrl || null, status: status || 'ACTIVE' }
+    });
+    res.status(201).json(newShop);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Ошибка при создании магазина' });
+  }
+});
+
+// Роут: Обновление магазина
+app.put('/api/shops/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description, imageUrl, status } = req.body;
+    const updated = await prisma.shop.update({
+      where: { id: parseInt(id) },
+      data: { name, description, imageUrl, status }
+    });
+    res.json(updated);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Ошибка при обновлении магазина' });
+  }
+});
+
+// Роут: Удаление магазина
+app.delete('/api/shops/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const productsCount = await prisma.product.count({ where: { shopId: parseInt(id) } });
+    const catsCount = await prisma.category.count({ where: { shopId: parseInt(id) } });
+    if (productsCount > 0 || catsCount > 0) {
+      return res.status(400).json({ error: `Нельзя удалить: в магазине ${productsCount} товар(ов) и ${catsCount} категорий` });
+    }
+    await prisma.shop.delete({ where: { id: parseInt(id) } });
+    res.json({ success: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Ошибка при удалении магазина', details: error.message });
+  }
+});
+
+// ==========================================
+// CATEGORIES
+// ==========================================
+
+// Роут: Получение категорий (доступен всем)
+app.get('/api/categories', async (req, res) => {
+  try {
+    const categories = await prisma.category.findMany();
+    res.json(categories);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Ошибка получения категорий' });
+  }
+});
+
+// Роут: Создание категории (только для админов)
+app.post('/api/categories', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { name, shopId, parentId } = req.body;
+    if (!name) {
+      return res.status(400).json({ error: 'Name is required' });
+    }
+    const newCategory = await prisma.category.create({
+      data: {
+        name,
+        shopId: shopId ? parseInt(shopId) : null,
+        parentId: parentId ? parseInt(parentId) : null
+      }
+    });
+    res.status(201).json(newCategory);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Ошибка при создании категории' });
+  }
+});
+
+// Роут: Получение всех товаров (доступен всем)
+// ?all=true — показать все (для админки), иначе только stock > 0
+app.get('/api/products', async (req, res) => {
+  try {
+    const showAll = req.query.all === 'true';
+    const products = await prisma.product.findMany({
+      where: showAll ? {} : { stock: { gt: 0 } },
+      include: { category: true }
+    });
+    res.json(products);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Ошибка получения товаров' });
+  }
+});
+
+// Роут: Добавление товара (только для админов)
+app.post('/api/products', requireAuth, requireAdmin, async (req, res) => {
+  console.log(`[▶️ POST /api/products] Incoming payload:`, req.body);
+  try {
+    const { title, description, price, stock, imageUrls, categoryId, shopId } = req.body;
+
+    if (!title || !price) {
+      return res.status(400).json({ error: 'Title and price are required' });
+    }
+
+    const newProduct = await prisma.product.create({
+      data: {
+        title,
+        description: description || '',
+        price: parseFloat(price),
+        stock: stock ? parseInt(stock) : 0,
+        imageUrls: imageUrls || null,
+        categoryId: categoryId ? parseInt(categoryId) : null,
+        shopId: shopId ? parseInt(shopId) : null
+      },
+      include: { category: true }
+    });
+
+    console.log(`[✅ POST /api/products] Database Save SUCCESS:`, newProduct);
+    res.status(201).json(newProduct);
+  } catch (error) {
+    console.error(`[❌ POST /api/products] Database Save ERROR:`, error);
+    res.status(500).json({ error: 'Ошибка при создании товара', details: error.message });
+  }
+});
+
+// Роут: Обновление товара (только для админов)
+app.put('/api/products/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, description, price, stock, imageUrls, categoryId, shopId } = req.body;
+    const updated = await prisma.product.update({
+      where: { id: parseInt(id) },
+      data: {
+        title,
+        description: description || '',
+        price: parseFloat(price),
+        stock: stock !== undefined ? parseInt(stock) : undefined,
+        imageUrls: imageUrls || null,
+        categoryId: categoryId ? parseInt(categoryId) : null,
+        shopId: shopId ? parseInt(shopId) : null
+      },
+      include: { category: true }
+    });
+    res.json(updated);
+  } catch (error) {
+    console.error('Error updating product:', error);
+    res.status(500).json({ error: 'Ошибка при обновлении товара', details: error.message });
+  }
+});
+
+// Роут: Удаление товара (только для админов)
+app.delete('/api/products/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await prisma.product.delete({ where: { id: parseInt(id) } });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting product:', error);
+    res.status(500).json({ error: 'Ошибка при удалении товара', details: error.message });
+  }
+});
+
+// Роут: Обновление категории (только для админов)
+app.put('/api/categories/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, shopId, parentId } = req.body;
+    if (!name) return res.status(400).json({ error: 'Name is required' });
+
+    // Find existing to fallback values if not provided explicitly
+    const existing = await prisma.category.findUnique({ where: { id: parseInt(id) } });
+    if (!existing) return res.status(404).json({ error: 'Category not found' });
+
+    const updated = await prisma.category.update({
+      where: { id: parseInt(id) },
+      data: {
+        name,
+        shopId: shopId !== undefined ? (shopId ? parseInt(shopId) : null) : existing.shopId,
+        parentId: parentId !== undefined ? (parentId ? parseInt(parentId) : null) : existing.parentId
+      }
+    });
+    res.json(updated);
+  } catch (error) {
+    console.error('Error updating category:', error);
+    res.status(500).json({ error: 'Ошибка при обновлении категории', details: error.message });
+  }
+});
+
+// Роут: Удаление категории (только для админов)
+app.delete('/api/categories/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const count = await prisma.product.count({ where: { categoryId: parseInt(id) } });
+    if (count > 0) {
+      return res.status(400).json({ error: `Нельзя удалить: в категории ${count} товар(ов)` });
+    }
+    const childrenCount = await prisma.category.count({ where: { parentId: parseInt(id) } });
+    if (childrenCount > 0) {
+      return res.status(400).json({ error: `Нельзя удалить: в категории ${childrenCount} подкатегорий` });
+    }
+    await prisma.category.delete({ where: { id: parseInt(id) } });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting category:', error);
+    res.status(500).json({ error: 'Ошибка при удалении категории', details: error.message });
+  }
+});
+
+// ==========================================
+// ORDER ROUTES
+// ==========================================
+
+// Роут: Создание заказа (авторизованные пользователи)
+app.post('/api/orders', requireAuth, async (req, res) => {
+  try {
+    const { items, paymentMethod, deliveryMethod, address } = req.body;
+
+    if (!items || !items.length || !paymentMethod || !deliveryMethod) {
+      return res.status(400).json({ error: 'Необходимы: items, paymentMethod, deliveryMethod' });
+    }
+
+    // Проверяем stock и считаем total
+    let total = 0;
+    const productChecks = [];
+
+    for (const item of items) {
+      const product = await prisma.product.findUnique({ where: { id: item.productId } });
+      if (!product) {
+        return res.status(400).json({ error: `Товар #${item.productId} не найден` });
+      }
+      if (product.stock < item.quantity) {
+        return res.status(400).json({ error: `Недостаточно "${product.title}" — осталось ${product.stock} шт.` });
+      }
+      total += product.price * item.quantity;
+      productChecks.push({ product, quantity: item.quantity });
+    }
+
+    // Транзакция: создаем заказ + списываем stock
+    const order = await prisma.$transaction(async (tx) => {
+      // Списываем stock
+      for (const { product, quantity } of productChecks) {
+        await tx.product.update({
+          where: { id: product.id },
+          data: { stock: { decrement: quantity } }
+        });
+      }
+
+      // Создаем заказ
+      return tx.order.create({
+        data: {
+          userId: req.user.id,
+          paymentMethod,
+          deliveryMethod,
+          address: address || null,
+          total,
+          items: {
+            create: productChecks.map(({ product, quantity }) => ({
+              productId: product.id,
+              quantity,
+              price: product.price
+            }))
+          }
+        },
+        include: {
+          items: { include: { product: true } }
+        }
+      });
+    });
+
+    console.log(`[✅ ORDER #${order.id}] ${deliveryMethod} / ${paymentMethod} / ${total}₽`);
+    res.status(201).json(order);
+  } catch (error) {
+    console.error('Error creating order:', error);
+    res.status(500).json({ error: 'Ошибка при создании заказа', details: error.message });
+  }
+});
+
+// Роут: Получение заказов пользователя
+app.get('/api/orders', requireAuth, async (req, res) => {
+  try {
+    const orders = await prisma.order.findMany({
+      where: { userId: req.user.id },
+      include: {
+        items: { include: { product: true } }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(orders);
+  } catch (error) {
+    console.error('Error fetching orders:', error);
+    res.status(500).json({ error: 'Ошибка получения заказов' });
+  }
+});
+
+// Роут: Получение всех заказов (только для админов)
+app.get('/api/orders/all', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const orders = await prisma.order.findMany({
+      include: {
+        user: true,
+        courier: true,
+        items: { include: { product: true } }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(orders);
+  } catch (error) {
+    console.error('Error fetching all orders:', error);
+    res.status(500).json({ error: 'Ошибка получения всех заказов' });
+  }
+});
+
+// Роут: Обновление статуса/курьера заказа (только для админов)
+app.put('/api/orders/:id/admin', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, courierId } = req.body;
+
+    const updateData = {};
+    if (status) updateData.status = status;
+    if (courierId !== undefined) updateData.courierId = courierId ? parseInt(courierId) : null;
+
+    const updated = await prisma.order.update({
+      where: { id: parseInt(id) },
+      data: updateData,
+      include: {
+        user: true,
+        courier: true,
+        items: { include: { product: true } }
+      }
+    });
+    res.json(updated);
+  } catch (error) {
+    console.error('Error updating order by admin:', error);
+    res.status(500).json({ error: 'Ошибка при обновлении заказа', details: error.message });
+  }
+});
+
+// ==========================================
+// COURIER ROUTES
+// ==========================================
+
+// Роут: Получение всех заказов готовых к доставке (для курьеров)
+app.get('/api/courier/orders', requireAuth, requireCourier, async (req, res) => {
+  try {
+    const whereClause = {
+      status: { in: ['PENDING', 'CONFIRMED', 'DELIVERING'] }
+    };
+
+    // В продакшене отдаем заказы только этого курьера. В DEV_MODE отдаем все для тестов.
+    if (!DEV_MODE) {
+      whereClause.courierId = req.user.id;
+    }
+
+    const orders = await prisma.order.findMany({
+      where: whereClause,
+      include: {
+        user: true,
+        items: { include: { product: { include: { shop: true } } } }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(orders);
+  } catch (error) {
+    console.error('Error fetching courier orders:', error);
+    res.status(500).json({ error: 'Ошибка получения заказов для курьера' });
+  }
+});
+
+// Роут: Изменение статуса заказа (для курьеров)
+app.put('/api/courier/orders/:id/status', requireAuth, requireCourier, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    if (!['CONFIRMED', 'DELIVERING', 'COMPLETED'].includes(status)) {
+      return res.status(400).json({ error: 'Недопустимый статус заказа' });
+    }
+    const updateData = { status };
+    if (status === 'CONFIRMED' || status === 'DELIVERING') {
+      updateData.courierId = req.user.id;
+    }
+
+    const updated = await prisma.order.update({
+      where: { id: parseInt(id) },
+      data: updateData
+    });
+    res.json(updated);
+  } catch (error) {
+    console.error('Error updating status:', error);
+    res.status(500).json({ error: 'Ошибка изменения статуса заказа' });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT} | DEV_MODE: ${DEV_MODE}`);
+});
