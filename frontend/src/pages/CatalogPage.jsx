@@ -75,48 +75,29 @@ export default function CatalogPage() {
     })
 
     return (
-        <div className="w-full max-w-2xl mx-auto flex flex-col gap-6">
+        <div className="w-full flex flex-col gap-5">
 
             {/* User Profile Card */}
             <UserProfileCard />
 
             {/* Store Header */}
-            <div className="text-center animate-fade-in pt-2">
-                <div className="inline-flex items-center justify-center p-3 rounded-2xl glass mb-3">
+            <div className="text-center animate-fade-in">
+                <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-3 animate-float"
+                    style={{ background: 'linear-gradient(135deg, rgba(124,58,237,0.3), rgba(217,70,239,0.2))', border: '1px solid rgba(139,92,246,0.3)', boxShadow: '0 8px 32px rgba(124,58,237,0.25)' }}>
                     <ShoppingBag className="w-7 h-7 text-fuchsia-400" />
                 </div>
-                <h1 className="text-3xl font-extrabold tracking-tight mb-1">
-                    <span className="bg-clip-text text-transparent bg-gradient-to-r from-violet-400 via-fuchsia-400 to-orange-400">
-                        Каталог
-                    </span>
+                <h1 className="text-3xl font-black tracking-tight mb-1">
+                    <span className="gradient-text-animate">Каталог</span>
                 </h1>
-                <p className="text-slate-500 text-xs">
-                    {user ? `Привет, ${user.name || 'покупатель'}!` : 'Выбирайте лучшие товары для себя'}
+                <p className="text-slate-500 text-sm">
+                    {user ? `Привет, ${user.name?.split(' ')[0] || 'друг'}! 👋` : 'Лучшие товары для вас'}
                 </p>
-                {isAdmin && (
-                    <Link
-                        to="/admin"
-                        className="inline-flex items-center gap-1.5 mt-3 mr-2 px-4 py-1.5 rounded-xl glass border-white/10 text-xs font-medium text-fuchsia-400 hover:text-fuchsia-300 hover:border-white/20 transition-all"
-                    >
-                        <Settings className="w-3.5 h-3.5" />
-                        Панель администратора
-                    </Link>
-                )}
-                {isCourier && (
-                    <Link
-                        to="/courier"
-                        className="inline-flex items-center gap-1.5 mt-3 mr-2 px-4 py-1.5 rounded-xl glass border-white/10 text-xs font-medium text-violet-400 hover:text-violet-300 hover:border-white/20 transition-all"
-                    >
-                        <Truck className="w-3.5 h-3.5" />
-                        Панель курьера
-                    </Link>
-                )}
                 <Link
                     to="/orders"
-                    className="inline-flex items-center gap-1.5 mt-2 px-4 py-1.5 rounded-xl glass border-white/10 text-xs font-medium text-slate-400 hover:text-violet-400 hover:border-white/20 transition-all"
+                    className="inline-flex items-center gap-1.5 mt-3 px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 press-scale transition-all"
+                    style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
                 >
-                    <Package className="w-3.5 h-3.5" />
-                    Мои заказы
+                    <Package className="w-3.5 h-3.5" /> Мои заказы
                 </Link>
             </div>
 
@@ -145,48 +126,39 @@ export default function CatalogPage() {
             {/* Main Content Area */}
             {isLoading ? (
                 <div className="grid grid-cols-2 gap-3">
-                    {[...Array(4)].map((_, i) => (
-                        <div key={i} className="glass rounded-[20px] overflow-hidden animate-pulse">
-                            <div className="aspect-square bg-slate-800/50" />
+                    {[...Array(6)].map((_, i) => (
+                        <div key={i} className="rounded-2xl overflow-hidden" style={{ animationDelay: `${i * 60}ms` }}>
+                            <div className="aspect-[4/5] skeleton" />
                             <div className="p-3 space-y-2">
-                                <div className="h-3 bg-slate-700/50 rounded-full w-3/4" />
-                                <div className="h-4 bg-slate-700/50 rounded-full w-1/2" />
+                                <div className="h-3 skeleton rounded-full w-3/4" />
+                                <div className="h-4 skeleton rounded-full w-1/2" />
                             </div>
                         </div>
                     ))}
                 </div>
             ) : (!selectedShop && !searchQuery) ? (
-                // --- SHOPS VIEW ---
-                <div className="flex flex-col gap-4 animate-fade-in" style={{ animationDelay: '200ms' }}>
-                    <h2 className="text-xl font-bold text-slate-200 tracking-wider">
-                        Выберите направление
-                    </h2>
-                    <div className="grid grid-cols-1 gap-4">
+                <div className="flex flex-col gap-4 animate-fade-in">
+                    <h2 className="text-lg font-bold text-slate-200 tracking-wide">Направления</h2>
+                    <div className="grid grid-cols-1 gap-3">
                         {shops.map((shop, i) => (
                             <button
                                 key={shop.id}
                                 onClick={() => setSelectedShop(shop)}
-                                className="glass rounded-[20px] p-6 flex items-center justify-between hover:border-fuchsia-500/30 transition-all duration-300 hover:shadow-[0_4px_20px_rgba(168,85,247,0.1)] group text-left relative overflow-hidden"
-                                style={{ animationDelay: `${(i * 50)}ms`, animationFillMode: 'forwards' }}
+                                className="card-premium rounded-2xl p-5 flex items-center justify-between text-left group"
+                                style={{ animationDelay: `${i * 60}ms` }}
                             >
-                                {/* Background glow effect based on shop config could go here */}
-                                <div className="flex items-center gap-4 relative z-10 w-full">
-                                    <div className={`rounded-2xl flex shrink-0 items-center justify-center group-hover:scale-110 transition-transform duration-300 ${shop.imageUrl ? 'w-16 h-16 pointer-events-none bg-black/20' : 'p-4 bg-fuchsia-500/10 border border-fuchsia-500/20'}`}>
-                                        {shop.imageUrl ? (
-                                            <img src={shop.imageUrl} alt={shop.name} className="w-full h-full object-cover rounded-2xl drop-shadow-md" />
-                                        ) : (
-                                            <Store className="w-8 h-8 text-fuchsia-400" />
-                                        )}
+                                <div className="flex items-center gap-4 w-full">
+                                    <div className={`rounded-2xl flex shrink-0 items-center justify-center transition-transform duration-300 group-hover:scale-110 ${shop.imageUrl ? 'w-14 h-14' : 'w-14 h-14 bg-fuchsia-500/10 border border-fuchsia-500/20'}`}>
+                                        {shop.imageUrl
+                                            ? <img src={shop.imageUrl} alt={shop.name} className="w-full h-full object-cover rounded-2xl" />
+                                            : <Store className="w-7 h-7 text-fuchsia-400" />
+                                        }
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <h3 className="text-lg font-bold text-slate-200 group-hover:text-fuchsia-300 transition-colors truncate">
-                                            {shop.name}
-                                        </h3>
-                                        <p className="text-slate-400 text-xs mt-1">
-                                            {categories.filter(c => c.shopId === shop.id || (!c.shopId && shop.name === 'ASG')).length} категорий
-                                        </p>
+                                        <h3 className="text-base font-bold text-slate-200 group-hover:text-fuchsia-300 transition-colors truncate">{shop.name}</h3>
+                                        <p className="text-slate-500 text-xs mt-0.5">{categories.filter(c => c.shopId === shop.id).length} категорий</p>
                                     </div>
-                                    <ChevronRight className="w-6 h-6 text-slate-500 group-hover:text-fuchsia-400 group-hover:translate-x-1 transition-all shrink-0" />
+                                    <ChevronRight className="w-5 h-5 text-slate-500 group-hover:text-fuchsia-400 group-hover:translate-x-1 transition-all shrink-0" />
                                 </div>
                             </button>
                         ))}
@@ -409,10 +381,14 @@ export default function CatalogPage() {
             {totalItems > 0 && (
                 <Link
                     to="/cart"
-                    className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white font-bold rounded-2xl shadow-[0_4px_20px_rgba(168,85,247,0.4)] hover:shadow-[0_4px_30px_rgba(168,85,247,0.6)] transition-all active:scale-[0.95] animate-fade-in"
+                    className="fixed bottom-6 right-4 z-40 flex items-center gap-2 px-5 py-3.5 text-white font-bold rounded-2xl press-scale animate-fade-in-scale"
+                    style={{
+                        background: 'linear-gradient(135deg, #7c3aed, #db2777)',
+                        boxShadow: '0 8px 32px rgba(124,58,237,0.5), 0 2px 8px rgba(0,0,0,0.3)',
+                    }}
                 >
                     <ShoppingCart className="w-5 h-5" />
-                    <span>{totalItems}</span>
+                    <span className="text-sm">{totalItems}</span>
                 </Link>
             )}
         </div>

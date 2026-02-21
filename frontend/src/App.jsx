@@ -130,11 +130,13 @@ function App() {
   return (
     <AuthProvider>
       <CartProvider>
-        <div className="min-h-screen font-sans relative flex flex-col items-center py-8 px-4 sm:px-6 overflow-hidden bg-[#0a0f1c] text-slate-100 selection:bg-fuchsia-500/30">
-          <div className="absolute top-[-10%] left-[-10%] w-[40vw] h-[40vw] rounded-full bg-violet-600/20 blur-[120px] pointer-events-none" />
-          <div className="absolute bottom-[-10%] right-[-10%] w-[40vw] h-[40vw] rounded-full bg-fuchsia-600/20 blur-[120px] pointer-events-none" />
-          <div className="absolute top-[40%] left-[60%] w-[30vw] h-[30vw] rounded-full bg-blue-600/10 blur-[100px] pointer-events-none" />
-          <div className="w-full z-10">
+        <div className="min-h-screen min-h-dvh font-sans relative flex flex-col items-center overflow-x-hidden bg-[#060b18] text-slate-100">
+          {/* Ambient orbs */}
+          <div className="fixed top-[-15%] left-[-15%] w-[60vw] h-[60vw] rounded-full pointer-events-none" style={{ background: 'radial-gradient(circle, rgba(124,58,237,0.18) 0%, transparent 70%)', filter: 'blur(60px)' }} />
+          <div className="fixed bottom-[-10%] right-[-10%] w-[55vw] h-[55vw] rounded-full pointer-events-none" style={{ background: 'radial-gradient(circle, rgba(217,70,239,0.15) 0%, transparent 70%)', filter: 'blur(60px)' }} />
+          <div className="fixed top-[40%] left-[50%] w-[40vw] h-[40vw] rounded-full pointer-events-none" style={{ background: 'radial-gradient(circle, rgba(59,130,246,0.08) 0%, transparent 70%)', filter: 'blur(80px)' }} />
+          {/* Content */}
+          <div className="relative z-10 w-full max-w-lg px-4 pt-6 pb-24">
             <AppRoutes />
           </div>
         </div>
