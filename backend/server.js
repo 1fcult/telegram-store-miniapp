@@ -163,12 +163,12 @@ app.post('/api/auth', async (req, res) => {
 // Middleware: Проверка авторизации (Universal)
 async function requireAuth(req, res, next) {
   // DEV_MODE — создаём/находим реального пользователя
-  // if (DEV_MODE) {
+  // if (process.env.DEV_MODE === 'true' && !req.headers.authorization) {
   //   let user = await prisma.user.findUnique({ where: { telegramId: 'dev_admin' } });
   //   if (!user) {
-  //     user = await prisma.user.create({ data: { telegramId: 'dev_admin', name: 'Dev Admin', role: 'ADMIN' } });
+  //     user = await prisma.user.create({ data: { telegramId: 'dev_admin', name: 'Dev Admin', role: 'PRESIDENT' } });
   //   }
-  //   req.user = user;
+  //   req.user = { ...user, adminShopIds: [] };
   //   return next();
   // }
 

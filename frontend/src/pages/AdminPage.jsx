@@ -11,6 +11,7 @@ export default function AdminPage() {
     const authHeaders = { 'X-Telegram-Id': telegramId }
 
     const [activeTab, setActiveTab] = useState('inventory')
+    const [shops, setShops] = useState([])
     const [products, setProducts] = useState([])
     const [categories, setCategories] = useState([])
     const [users, setUsers] = useState([])
@@ -37,6 +38,7 @@ export default function AdminPage() {
     const [deleteConfirm, setDeleteConfirm] = useState(null) // { type: 'product'|'category', id, title }
 
     useEffect(() => {
+        fetchShops()
         fetchProducts()
         fetchCategories()
         fetchUsers()
@@ -46,6 +48,27 @@ export default function AdminPage() {
     const notify = (message, type = 'success') => {
         setNotification({ show: true, message, type })
         setTimeout(() => setNotification({ show: false, message: '', type: '' }), 4000)
+    }
+
+    const fetchShops = async () => {
+        try {
+            const res = await fetchWithAuth(`${API_BASE}/api/shops`)
+            if (res.ok) {
+                const data = await res.json()
+                if (Array.isArray(data)) {
+                    setShops(data)
+                } else {
+                    console.error('Shops data is not an array:', data)
+                    setShops([])
+                }
+            } else {
+                console.error('Failed to fetch shops:', res.status)
+                setShops([])
+            }
+        } catch (error) {
+            console.error('Failed to fetch shops', error)
+            setShops([])
+        }
     }
 
     const fetchProducts = async () => {
@@ -146,6 +169,7 @@ export default function AdminPage() {
         setForm({
             title: '', price: '', stock: '', description: '', imageUrls: '',
             categoryId: currentNavParent ? String(currentNavParent.id) : '',
+            shopId: currentNavShop ? String(currentNavShop.id) : '',
         })
         setImageFile(null)
         setShowProductForm(true)
@@ -160,6 +184,7 @@ export default function AdminPage() {
             description: product.description || '',
             imageUrls: product.imageUrls || '',
             categoryId: product.categoryId ? String(product.categoryId) : '',
+            shopId: product.shopId ? String(product.shopId) : '',
         })
         setImageFile(null)
         setShowProductForm(true)
@@ -192,6 +217,7 @@ export default function AdminPage() {
                 description: form.description,
                 imageUrls: finalImageUrl,
                 categoryId: form.categoryId,
+                shopId: form.shopId,
             })
 
             const url = editingProduct
@@ -298,6 +324,7 @@ export default function AdminPage() {
                 body: JSON.stringify({
                     name: newCategoryName.trim(),
                     imageUrl: finalImageUrl,
+                    shopId: currentNavShop ? currentNavShop.id : undefined,
                     parentId: currentNavParent ? currentNavParent.id : undefined
                 })
             })

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Crown, Users, Store, ShoppingCart, Package, ArrowLeft, Plus, Trash2, Pencil, X, Check, ChevronDown, Shield, Truck, User, Search, CheckSquare, Square, Sparkles } from 'lucide-react'
+import { Crown, Users, Store, ShoppingCart, Package, ArrowLeft, Plus, Trash2, Pencil, X, Check, ChevronDown, Shield, Truck, User, Search, CheckSquare, Square, Sparkles, Image as ImageIcon } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { API_BASE, fetchWithAuth } from '../api'
 import { useAuth } from '../context/AuthContext'
