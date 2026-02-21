@@ -21,29 +21,61 @@ function AppRoutes() {
     )
   }
 
-  // Если не Telegram или ошибка — показываем экран
+  // Если реально открыт в браузере (не Telegram)
   if (!user) {
+    // Сеть или ошибка сервера, но мы в Telegram — позволяем retry
+    if (authError === 'failed' || authError === 'network') {
+      return (
+        <div className="w-full max-w-lg mx-auto flex flex-col items-center justify-center min-h-[70vh] gap-5 animate-fade-in px-4 text-center">
+          <div className="w-20 h-20 rounded-full flex items-center justify-center"
+            style={{ background: 'linear-gradient(135deg, rgba(239,68,68,0.2), rgba(217,70,239,0.2))', border: '1px solid rgba(239,68,68,0.3)' }}>
+            <Bot className="w-10 h-10 text-red-400" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-slate-100 mb-2">Ошибка подключения</h2>
+            <p className="text-slate-400 text-sm leading-relaxed">Не удалось соединиться с сервером. Проверьте подключение.</p>
+          </div>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-6 py-3 rounded-xl font-semibold text-white text-sm transition-all"
+            style={{ background: 'linear-gradient(135deg, #7c3aed, #db2777)' }}
+          >
+            Попробовать снова
+          </button>
+        </div>
+      )
+    }
+
+    // Реально не Telegram — показываем экран
+    if (authError === 'not_telegram') {
+      return (
+        <div className="w-full max-w-lg mx-auto flex flex-col items-center justify-center min-h-[70vh] gap-5 animate-fade-in px-4 text-center">
+          <div className="w-20 h-20 rounded-full flex items-center justify-center"
+            style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.3), rgba(217,70,239,0.3))', border: '1px solid rgba(139,92,246,0.4)' }}>
+            <Bot className="w-10 h-10 text-violet-400" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-slate-100 mb-2">Откройте через Telegram</h2>
+            <p className="text-slate-400 text-sm leading-relaxed">
+              Это приложение работает только внутри Telegram. Откройте бота и нажмите кнопку «Открыть магазин».
+            </p>
+          </div>
+          <a
+            href="https://t.me/antsocial_bot"
+            className="px-6 py-3 rounded-xl font-semibold text-white text-sm transition-all"
+            style={{ background: 'linear-gradient(135deg, #7c3aed, #db2777)' }}
+          >
+            Открыть в Telegram
+          </a>
+        </div>
+      )
+    }
+
+    // null user без ошибки — значит авторизация всё ещё идёт, показываем spinner
     return (
-      <div className="w-full max-w-lg mx-auto flex flex-col items-center justify-center min-h-[70vh] gap-5 animate-fade-in px-4 text-center">
-        <div className="w-20 h-20 rounded-full flex items-center justify-center"
-          style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.3), rgba(217,70,239,0.3))', border: '1px solid rgba(139,92,246,0.4)' }}>
-          <Bot className="w-10 h-10 text-violet-400" />
-        </div>
-        <div>
-          <h2 className="text-xl font-bold text-slate-100 mb-2">Откройте через Telegram</h2>
-          <p className="text-slate-400 text-sm leading-relaxed">
-            {authError === 'not_telegram'
-              ? 'Это приложение работает только внутри Telegram. Откройте бота и нажмите кнопку «Открыть магазин».'
-              : 'Не удалось авторизоваться. Попробуйте открыть магазин через бота ещё раз.'}
-          </p>
-        </div>
-        <a
-          href="https://t.me/antsocial_bot"
-          className="px-6 py-3 rounded-xl font-semibold text-white text-sm transition-all"
-          style={{ background: 'linear-gradient(135deg, #7c3aed, #db2777)' }}
-        >
-          Открыть в Telegram
-        </a>
+      <div className="w-full max-w-lg mx-auto flex flex-col items-center justify-center min-h-[60vh] gap-4">
+        <Loader2 className="w-8 h-8 text-fuchsia-400 animate-spin" />
+        <p className="text-slate-400 text-sm">Авторизация...</p>
       </div>
     )
   }

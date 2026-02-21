@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
-import { API_BASE, fetchWithAuth } from '../api'
+import { API_BASE } from '../api'
 
 const AuthContext = createContext(null)
 
@@ -16,17 +16,16 @@ export function AuthProvider({ children }) {
         try {
             const tg = window.Telegram?.WebApp
             const initData = tg?.initData || ''
-
             const isDev = import.meta.env.VITE_DEV_MODE === 'true'
 
-            // В продакшене без Telegram initData — сразу ошибка
-            if (!initData && !isDev) {
-                console.warn('[AUTH] No initData — not running inside Telegram')
+            // Если нет Telegram WebApp и нет dev режима — реально открыт в браузере
+            if (!tg && !isDev) {
                 setAuthError('not_telegram')
                 setIsLoading(false)
                 return
             }
 
+            // Пытаемся авторизоваться
             const res = await fetch(`${API_BASE}/api/auth`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -37,18 +36,19 @@ export function AuthProvider({ children }) {
                 const data = await res.json()
                 setUser(data.user)
                 setAuthError(null)
-                console.log('[AUTH] ✅ User authenticated:', data.user?.username, '| role:', data.user?.role)
+                console.log('[AUTH] ✅ User:', data.user?.username, '| role:', data.user?.role)
                 if (tg) {
                     tg.ready()
                     tg.expand()
                 }
             } else {
-                console.error('[AUTH] ❌ Authentication failed', res.status)
+                // Авторизация не прошла, но мы в Telegram — показываем ошибку
+                console.error('[AUTH] ❌ Failed', res.status)
                 setUser(null)
                 setAuthError('failed')
             }
         } catch (error) {
-            console.error('[AUTH] ❌ Error:', error)
+            console.error('[AUTH] ❌ Network error:', error)
             setUser(null)
             setAuthError('network')
         } finally {
