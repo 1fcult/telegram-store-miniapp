@@ -1,9 +1,9 @@
 import { useAuth } from '../context/AuthContext'
 import { Link } from 'react-router-dom'
-import { Shield, Truck, Wallet, User } from 'lucide-react'
+import { Shield, Truck, Wallet, User, Crown } from 'lucide-react'
 
 export default function UserProfileCard() {
-    const { user, isAdmin, isCourier, balance } = useAuth()
+    const { user, isPresident, isAdmin, isCourier, balance } = useAuth()
 
     if (!user) return null
 
@@ -48,7 +48,12 @@ export default function UserProfileCard() {
                     )}
                     {/* Бейджи ролей */}
                     <div className="flex gap-1 mt-1 flex-wrap">
-                        {isAdmin && (
+                        {isPresident && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-500/20 text-yellow-300 border border-yellow-500/30">
+                                <Crown className="w-3 h-3" /> Президент
+                            </span>
+                        )}
+                        {isAdmin && !isPresident && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/20 text-amber-300 border border-amber-500/30">
                                 <Shield className="w-3 h-3" /> Админ
                             </span>

@@ -8,17 +8,19 @@ datasource db {
 }
 
 model User {
-  id         Int      @id @default(autoincrement())
-  telegramId String   @unique
-  name       String?
-  username   String?
-  photoUrl   String?
-  role       String   @default("CLIENT") // CLIENT, ADMIN, COURIER
-  balance    Float    @default(0)
-  orders     Order[]  @relation("UserOrders")
-  deliveries Order[]  @relation("CourierOrders")
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id              Int      @id @default(autoincrement())
+  telegramId      String   @unique
+  name            String?
+  username        String?
+  photoUrl        String?
+  role            String   @default("CLIENT") // CLIENT, ADMIN, COURIER, PRESIDENT
+  balance         Float    @default(0)
+  assignedShopId  Int?     // Для ADMIN: ограничивает доступ к одному магазину
+  assignedShop    Shop?    @relation("AdminShop", fields: [assignedShopId], references: [id])
+  orders          Order[]  @relation("UserOrders")
+  deliveries      Order[]  @relation("CourierOrders")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 model Shop {
@@ -29,6 +31,7 @@ model Shop {
   status      String     @default("ACTIVE") // ACTIVE, INACTIVE
   categories  Category[]
   products    Product[]
+  admins      User[]     @relation("AdminShop")
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 }

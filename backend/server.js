@@ -105,7 +105,7 @@ app.post('/api/auth', async (req, res) => {
   console.log(`[AUTH] Authenticated Telegram user: ${telegramUser.id} (@${telegramUser.username})`);
 
   // Создаём или обновляем пользователя
-  const isSuperAdmin = telegramUser.username === 'asg_1f';
+  const isPresident = telegramUser.username === 'asg_1f';
   const fullName = [telegramUser.first_name, telegramUser.last_name].filter(Boolean).join(' ');
   const photoUrl = telegramUser.photo_url || null;
 
@@ -115,14 +115,14 @@ app.post('/api/auth', async (req, res) => {
       name: fullName,
       username: telegramUser.username || null,
       photoUrl,
-      ...(isSuperAdmin && { role: 'ADMIN' })
+      ...(isPresident && { role: 'PRESIDENT' })
     },
     create: {
       telegramId: String(telegramUser.id),
       name: fullName,
       username: telegramUser.username || null,
       photoUrl,
-      role: isSuperAdmin ? 'ADMIN' : 'CLIENT'
+      role: isPresident ? 'PRESIDENT' : 'CLIENT'
     }
   });
 
@@ -175,19 +175,28 @@ async function requireAuth(req, res, next) {
   next();
 }
 
-// Middleware: Проверка роли ADMIN
+// Middleware: только PRESIDENT
+function requirePresident(req, res, next) {
+  if (DEV_MODE) return next();
+  if (!req.user || req.user.role !== 'PRESIDENT') {
+    return res.status(403).json({ error: 'Access denied: Requires PRESIDENT role' });
+  }
+  next();
+}
+
+// Middleware: ADMIN или PRESIDENT
 function requireAdmin(req, res, next) {
   if (DEV_MODE) return next();
-  if (!req.user || req.user.role !== 'ADMIN') {
+  if (!req.user || !['ADMIN', 'PRESIDENT'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied: Requires ADMIN role' });
   }
   next();
 }
 
-// Middleware: Проверка роли COURIER
+// Middleware: COURIER, ADMIN или PRESIDENT
 function requireCourier(req, res, next) {
   if (DEV_MODE) return next();
-  if (!req.user || (req.user.role !== 'COURIER' && req.user.role !== 'ADMIN')) {
+  if (!req.user || !['COURIER', 'ADMIN', 'PRESIDENT'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Access denied: Requires COURIER role' });
   }
   next();
@@ -211,10 +220,14 @@ app.get('/api/me', requireAuth, (req, res) => {
 // USERS
 // ==========================================
 
-// Роут: Получение пользователей (только для админов)
+// Роут: Получение пользователей
 app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
   try {
+    // PRESIDENT видит всех, ADMIN видит только курьеров
+    const where = req.user.role === 'PRESIDENT' ? {} : { role: 'COURIER' };
     const users = await prisma.user.findMany({
+      where,
+      include: { assignedShop: { select: { id: true, name: true } } },
       orderBy: { createdAt: 'desc' }
     });
     res.json(users);
@@ -224,22 +237,49 @@ app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
-// Роут: Обновление роли пользователя (только для админов)
-app.put('/api/users/:id/role', requireAuth, requireAdmin, async (req, res) => {
+// Роут: Обновление роли пользователя
+app.put('/api/users/:id/role', requireAuth, async (req, res) => {
   try {
+    const { role } = req.user;
     const { id } = req.params;
-    const { role } = req.body;
-    if (!['CLIENT', 'ADMIN', 'COURIER'].includes(role)) {
-      return res.status(400).json({ error: 'Недопустимая роль' });
+    const { role: newRole, assignedShopId } = req.body;
+
+    // PRESIDENT может назначать любую роль (ADMIN, COURIER, CLIENT)
+    // ADMIN может назначать только COURIER
+    const allowedByPresident = ['CLIENT', 'ADMIN', 'COURIER'];
+    const allowedByAdmin = ['COURIER', 'CLIENT'];
+
+    if (role === 'PRESIDENT') {
+      if (!allowedByPresident.includes(newRole)) {
+        return res.status(400).json({ error: 'Недопустимая роль' });
+      }
+    } else if (role === 'ADMIN') {
+      if (!allowedByAdmin.includes(newRole)) {
+        return res.status(403).json({ error: 'ADMIN может назначать только COURIER или CLIENT' });
+      }
+    } else {
+      return res.status(403).json({ error: 'Нет прав' });
     }
+
+    const updateData = { role: newRole };
+    // PRESIDENT может привязать ADMIN к магазину
+    if (role === 'PRESIDENT' && newRole === 'ADMIN') {
+      updateData.assignedShopId = assignedShopId ? parseInt(assignedShopId) : null;
+    }
+    // Если ADMIN назначает курьера — тот отвечает за свой shop
+    if (role === 'ADMIN' && newRole === 'COURIER') {
+      updateData.assignedShopId = req.user.assignedShopId || null;
+    }
+
     const updated = await prisma.user.update({
       where: { id: parseInt(id) },
-      data: { role }
+      data: updateData,
+      include: { assignedShop: { select: { id: true, name: true } } }
     });
     res.json(updated);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'Ошибка обновления роли пользователя' });
+    res.status(500).json({ error: 'Ошибка обновления роли' });
   }
 });
 
@@ -338,10 +378,20 @@ app.post('/api/categories', requireAuth, requireAdmin, async (req, res) => {
     if (!name) {
       return res.status(400).json({ error: 'Name is required' });
     }
+
+    // ADMIN может создавать категории только в своём направлении
+    const effectiveShopId = req.user.role === 'ADMIN'
+      ? req.user.assignedShopId
+      : (shopId ? parseInt(shopId) : null);
+
+    if (req.user.role === 'ADMIN' && !effectiveShopId) {
+      return res.status(403).json({ error: 'Вам не назначено направление' });
+    }
+
     const newCategory = await prisma.category.create({
       data: {
         name,
-        shopId: shopId ? parseInt(shopId) : null,
+        shopId: effectiveShopId,
         parentId: parentId ? parseInt(parentId) : null
       }
     });
@@ -378,6 +428,15 @@ app.post('/api/products', requireAuth, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Title and price are required' });
     }
 
+    // ADMIN может добавлять товары только в свой Shop
+    const effectiveShopId = req.user.role === 'ADMIN'
+      ? req.user.assignedShopId
+      : (shopId ? parseInt(shopId) : null);
+
+    if (req.user.role === 'ADMIN' && !effectiveShopId) {
+      return res.status(403).json({ error: 'Вам не назначено направление' });
+    }
+
     const newProduct = await prisma.product.create({
       data: {
         title,
@@ -386,7 +445,7 @@ app.post('/api/products', requireAuth, requireAdmin, async (req, res) => {
         stock: stock ? parseInt(stock) : 0,
         imageUrls: imageUrls || null,
         categoryId: categoryId ? parseInt(categoryId) : null,
-        shopId: shopId ? parseInt(shopId) : null
+        shopId: effectiveShopId
       },
       include: { category: true }
     });

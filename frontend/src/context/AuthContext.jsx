@@ -66,10 +66,12 @@ export function AuthProvider({ children }) {
         user,
         isLoading,
         authError,
-        isAdmin: user?.role === 'ADMIN' || isDev,
-        isCourier: user?.role === 'COURIER' || user?.role === 'ADMIN' || isDev,
+        isPresident: user?.role === 'PRESIDENT' || isDev,
+        isAdmin: ['ADMIN', 'PRESIDENT'].includes(user?.role) || isDev,
+        isCourier: ['COURIER', 'ADMIN', 'PRESIDENT'].includes(user?.role) || isDev,
         telegramId: user?.telegramId || '',
         balance: user?.balance ?? 0,
+        assignedShopId: user?.assignedShopId ?? null,
         refetchUser: authenticate
     }
 
