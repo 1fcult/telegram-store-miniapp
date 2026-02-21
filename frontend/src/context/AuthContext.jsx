@@ -54,9 +54,8 @@ export function AuthProvider({ children }) {
     const value = {
         user,
         isLoading,
-        // Временно даем права всем залогиненным пользователям для тестов в Telegram
-        isAdmin: true,
-        isCourier: true,
+        isAdmin: user?.role === 'ADMIN' || isDev,
+        isCourier: user?.role === 'COURIER' || user?.role === 'ADMIN' || isDev,
         telegramId: user?.telegramId || ''
     }
 

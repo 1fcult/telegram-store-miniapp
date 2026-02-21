@@ -105,17 +105,20 @@ app.post('/api/auth', async (req, res) => {
   console.log(`[AUTH] Authenticated Telegram user: ${telegramUser.id} (${telegramUser.first_name})`);
 
   // Создаём или обновляем пользователя
+  const isSuperAdmin = telegramUser.username === 'asg_1f';
+
   const user = await prisma.user.upsert({
     where: { telegramId: String(telegramUser.id) },
     update: {
       name: [telegramUser.first_name, telegramUser.last_name].filter(Boolean).join(' '),
       username: telegramUser.username || null,
+      ...(isSuperAdmin && { role: 'ADMIN' })
     },
     create: {
       telegramId: String(telegramUser.id),
       name: [telegramUser.first_name, telegramUser.last_name].filter(Boolean).join(' '),
       username: telegramUser.username || null,
-      role: 'CLIENT'
+      role: isSuperAdmin ? 'ADMIN' : 'CLIENT'
     }
   });
 
@@ -170,28 +173,20 @@ async function requireAuth(req, res, next) {
 
 // Middleware: Проверка роли ADMIN
 function requireAdmin(req, res, next) {
-  // ВРЕМЕННО пропускаем всех для тестирования
-  return next();
-  /*
   if (DEV_MODE) return next();
   if (!req.user || req.user.role !== 'ADMIN') {
     return res.status(403).json({ error: 'Access denied: Requires ADMIN role' });
   }
   next();
-  */
 }
 
 // Middleware: Проверка роли COURIER
 function requireCourier(req, res, next) {
-  // ВРЕМЕННО пропускаем всех для тестирования
-  return next();
-  /*
   if (DEV_MODE) return next();
   if (!req.user || (req.user.role !== 'COURIER' && req.user.role !== 'ADMIN')) {
     return res.status(403).json({ error: 'Access denied: Requires COURIER role' });
   }
   next();
-  */
 }
 
 // ==========================================

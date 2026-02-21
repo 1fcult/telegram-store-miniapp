@@ -1,5 +1,5 @@
 const token = "8550097764:AAE8_avqxS8VC4fu85CmTmw6uQaMtPSBNvQ";
-const webAppUrl = "https://52b8ea4100ab2236-94-183-185-161.serveousercontent.com";
+const webAppUrl = "https://178-72-165-215.nip.io";
 
 fetch(`https://api.telegram.org/bot${token}/setChatMenuButton`, {
     method: 'POST',
