@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { API_BASE, fetchWithAuth } from '../api'
 import { useAuth } from '../context/AuthContext'
 import { useCart } from '../context/CartContext'
+import UserProfileCard from '../components/UserProfileCard'
 
 export default function CatalogPage() {
     const { user, isAdmin, isCourier } = useAuth()
@@ -75,6 +76,9 @@ export default function CatalogPage() {
 
     return (
         <div className="w-full max-w-2xl mx-auto flex flex-col gap-6">
+
+            {/* User Profile Card */}
+            <UserProfileCard />
 
             {/* Store Header */}
             <div className="text-center animate-fade-in pt-2">

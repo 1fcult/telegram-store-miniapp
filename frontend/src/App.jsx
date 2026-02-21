@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { CartProvider } from './context/CartContext'
 import CatalogPage from './pages/CatalogPage'
@@ -7,10 +7,10 @@ import CartPage from './pages/CartPage'
 import CheckoutPage from './pages/CheckoutPage'
 import OrdersPage from './pages/OrdersPage'
 import CourierPage from './pages/CourierPage'
-import { Shield, Loader2, Truck } from 'lucide-react'
+import { Shield, Loader2, Truck, Bot } from 'lucide-react'
 
 function AppRoutes() {
-  const { user, isLoading, isAdmin, isCourier } = useAuth()
+  const { user, isLoading, isAdmin, isCourier, authError } = useAuth()
 
   if (isLoading) {
     return (
@@ -21,8 +21,32 @@ function AppRoutes() {
     )
   }
 
-  // Временно: пропускаем проверку авторизации для удобства разработки
-  // if (!user) { return <AccessDenied /> }
+  // Если не Telegram или ошибка — показываем экран
+  if (!user) {
+    return (
+      <div className="w-full max-w-lg mx-auto flex flex-col items-center justify-center min-h-[70vh] gap-5 animate-fade-in px-4 text-center">
+        <div className="w-20 h-20 rounded-full flex items-center justify-center"
+          style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.3), rgba(217,70,239,0.3))', border: '1px solid rgba(139,92,246,0.4)' }}>
+          <Bot className="w-10 h-10 text-violet-400" />
+        </div>
+        <div>
+          <h2 className="text-xl font-bold text-slate-100 mb-2">Откройте через Telegram</h2>
+          <p className="text-slate-400 text-sm leading-relaxed">
+            {authError === 'not_telegram'
+              ? 'Это приложение работает только внутри Telegram. Откройте бота и нажмите кнопку «Открыть магазин».'
+              : 'Не удалось авторизоваться. Попробуйте открыть магазин через бота ещё раз.'}
+          </p>
+        </div>
+        <a
+          href="https://t.me/antsocial_bot"
+          className="px-6 py-3 rounded-xl font-semibold text-white text-sm transition-all"
+          style={{ background: 'linear-gradient(135deg, #7c3aed, #db2777)' }}
+        >
+          Открыть в Telegram
+        </a>
+      </div>
+    )
+  }
 
   return (
     <Routes>

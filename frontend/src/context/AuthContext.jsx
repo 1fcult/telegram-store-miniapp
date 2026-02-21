@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { API_BASE, fetchWithAuth } from '../api'
 
 const AuthContext = createContext(null)
@@ -10,18 +10,24 @@ export function useAuth() {
 export function AuthProvider({ children }) {
     const [user, setUser] = useState(null)
     const [isLoading, setIsLoading] = useState(true)
+    const [authError, setAuthError] = useState(null)
 
-    useEffect(() => {
-        authenticate()
-    }, [])
-
-    const authenticate = async () => {
+    const authenticate = useCallback(async () => {
         try {
-            // Получаем initData из Telegram WebApp (если запущено из Telegram)
             const tg = window.Telegram?.WebApp
             const initData = tg?.initData || ''
 
-            const res = await fetchWithAuth(`${API_BASE}/api/auth`, {
+            const isDev = import.meta.env.VITE_DEV_MODE === 'true'
+
+            // В продакшене без Telegram initData — сразу ошибка
+            if (!initData && !isDev) {
+                console.warn('[AUTH] No initData — not running inside Telegram')
+                setAuthError('not_telegram')
+                setIsLoading(false)
+                return
+            }
+
+            const res = await fetch(`${API_BASE}/api/auth`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ initData })
@@ -30,33 +36,41 @@ export function AuthProvider({ children }) {
             if (res.ok) {
                 const data = await res.json()
                 setUser(data.user)
-                console.log('[AUTH] User authenticated:', data.user)
-
-                // Сообщаем Telegram что приложение готово
+                setAuthError(null)
+                console.log('[AUTH] ✅ User authenticated:', data.user?.username, '| role:', data.user?.role)
                 if (tg) {
                     tg.ready()
                     tg.expand()
                 }
             } else {
-                console.error('[AUTH] Authentication failed')
+                console.error('[AUTH] ❌ Authentication failed', res.status)
                 setUser(null)
+                setAuthError('failed')
             }
         } catch (error) {
-            console.error('[AUTH] Error:', error)
+            console.error('[AUTH] ❌ Error:', error)
             setUser(null)
+            setAuthError('network')
         } finally {
             setIsLoading(false)
         }
-    }
+    }, [])
 
-    const isDev = import.meta.env.VITE_DEV_MODE === 'true';
+    useEffect(() => {
+        authenticate()
+    }, [authenticate])
+
+    const isDev = import.meta.env.VITE_DEV_MODE === 'true'
 
     const value = {
         user,
         isLoading,
+        authError,
         isAdmin: user?.role === 'ADMIN' || isDev,
         isCourier: user?.role === 'COURIER' || user?.role === 'ADMIN' || isDev,
-        telegramId: user?.telegramId || ''
+        telegramId: user?.telegramId || '',
+        balance: user?.balance ?? 0,
+        refetchUser: authenticate
     }
 
     return (

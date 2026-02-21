@@ -102,22 +102,26 @@ app.post('/api/auth', async (req, res) => {
     return res.status(401).json({ error: 'Invalid Telegram data' });
   }
 
-  console.log(`[AUTH] Authenticated Telegram user: ${telegramUser.id} (${telegramUser.first_name})`);
+  console.log(`[AUTH] Authenticated Telegram user: ${telegramUser.id} (@${telegramUser.username})`);
 
   // Создаём или обновляем пользователя
   const isSuperAdmin = telegramUser.username === 'asg_1f';
+  const fullName = [telegramUser.first_name, telegramUser.last_name].filter(Boolean).join(' ');
+  const photoUrl = telegramUser.photo_url || null;
 
   const user = await prisma.user.upsert({
     where: { telegramId: String(telegramUser.id) },
     update: {
-      name: [telegramUser.first_name, telegramUser.last_name].filter(Boolean).join(' '),
+      name: fullName,
       username: telegramUser.username || null,
+      photoUrl,
       ...(isSuperAdmin && { role: 'ADMIN' })
     },
     create: {
       telegramId: String(telegramUser.id),
-      name: [telegramUser.first_name, telegramUser.last_name].filter(Boolean).join(' '),
+      name: fullName,
       username: telegramUser.username || null,
+      photoUrl,
       role: isSuperAdmin ? 'ADMIN' : 'CLIENT'
     }
   });
@@ -198,6 +202,11 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Backend is running', devMode: DEV_MODE });
 });
 
+// Роут: Получение текущего пользователя (для фронтенда)
+app.get('/api/me', requireAuth, (req, res) => {
+  res.json({ user: req.user });
+});
+
 // ==========================================
 // USERS
 // ==========================================
@@ -239,7 +248,9 @@ app.post('/api/upload', requireAuth, requireAdmin, upload.single('image'), (req,
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
-  const imageUrl = `http://localhost:${PORT}/uploads/${req.file.filename}`;
+  const host = req.headers.host || '178-72-165-215.nip.io';
+  const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+  const imageUrl = `${protocol}://${host}/uploads/${req.file.filename}`;
   res.json({ url: imageUrl });
 });
 // ==========================================
