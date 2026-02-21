@@ -123,7 +123,8 @@ app.post('/api/auth', async (req, res) => {
       username: telegramUser.username || null,
       photoUrl,
       role: isPresident ? 'PRESIDENT' : 'CLIENT'
-    }
+    },
+    include: { adminShops: { include: { shop: { select: { id: true, name: true } } } } }
   });
 
   res.json({ user });
@@ -156,22 +157,27 @@ async function requireAuth(req, res, next) {
     return next();
   }
 
-  const initData = authHeader.substring(4); // Remove 'tma '
+  const initData = authHeader.substring(4);
   const telegramUser = validateInitData(initData);
 
   if (!telegramUser) {
     return res.status(401).json({ error: 'Unauthorized: Invalid Telegram data signature' });
   }
 
-  const user = await prisma.user.findUnique({ where: { telegramId: String(telegramUser.id) } });
+  const user = await prisma.user.findUnique({
+    where: { telegramId: String(telegramUser.id) },
+    include: { adminShops: { include: { shop: { select: { id: true, name: true } } } } }
+  });
 
   if (!user) {
-    // If user doesn't exist yet but passed auth, we might want to create them
-    // For now, let's just reject if they haven't called /api/auth first
     return res.status(401).json({ error: 'Unauthorized: User not found in database' });
   }
 
-  req.user = user;
+  // Attach convenience array of shopIds for ADMIN checks
+  req.user = {
+    ...user,
+    adminShopIds: user.adminShops.map(as => as.shopId)
+  };
   next();
 }
 
@@ -227,7 +233,7 @@ app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
     const where = req.user.role === 'PRESIDENT' ? {} : { role: 'COURIER' };
     const users = await prisma.user.findMany({
       where,
-      include: { assignedShop: { select: { id: true, name: true } } },
+      include: { adminShops: { include: { shop: { select: { id: true, name: true } } } } },
       orderBy: { createdAt: 'desc' }
     });
     res.json(users);
@@ -240,20 +246,18 @@ app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
 // Роут: Обновление роли пользователя
 app.put('/api/users/:id/role', requireAuth, async (req, res) => {
   try {
-    const { role } = req.user;
+    const actorRole = req.user.role;
     const { id } = req.params;
-    const { role: newRole, assignedShopId } = req.body;
+    const { role: newRole, shopIds } = req.body; // shopIds: number[] for ADMIN
 
-    // PRESIDENT может назначать любую роль (ADMIN, COURIER, CLIENT)
-    // ADMIN может назначать только COURIER
     const allowedByPresident = ['CLIENT', 'ADMIN', 'COURIER'];
     const allowedByAdmin = ['COURIER', 'CLIENT'];
 
-    if (role === 'PRESIDENT') {
+    if (actorRole === 'PRESIDENT') {
       if (!allowedByPresident.includes(newRole)) {
         return res.status(400).json({ error: 'Недопустимая роль' });
       }
-    } else if (role === 'ADMIN') {
+    } else if (actorRole === 'ADMIN') {
       if (!allowedByAdmin.includes(newRole)) {
         return res.status(403).json({ error: 'ADMIN может назначать только COURIER или CLIENT' });
       }
@@ -261,20 +265,27 @@ app.put('/api/users/:id/role', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Нет прав' });
     }
 
-    const updateData = { role: newRole };
-    // PRESIDENT может привязать ADMIN к магазину
-    if (role === 'PRESIDENT' && newRole === 'ADMIN') {
-      updateData.assignedShopId = assignedShopId ? parseInt(assignedShopId) : null;
-    }
-    // Если ADMIN назначает курьера — тот отвечает за свой shop
-    if (role === 'ADMIN' && newRole === 'COURIER') {
-      updateData.assignedShopId = req.user.assignedShopId || null;
+    const targetId = parseInt(id);
+
+    // Сначала обновляем роль
+    await prisma.user.update({ where: { id: targetId }, data: { role: newRole } });
+
+    // Для ADMIN: удаляем старые связи и создаём новые
+    if (newRole === 'ADMIN' && actorRole === 'PRESIDENT' && Array.isArray(shopIds)) {
+      await prisma.adminShop.deleteMany({ where: { userId: targetId } });
+      if (shopIds.length > 0) {
+        await prisma.adminShop.createMany({
+          data: shopIds.map(sId => ({ userId: targetId, shopId: parseInt(sId) }))
+        });
+      }
+    } else if (newRole !== 'ADMIN') {
+      // Если роль не ADMIN — удаляем все связи c магазинами
+      await prisma.adminShop.deleteMany({ where: { userId: targetId } });
     }
 
-    const updated = await prisma.user.update({
-      where: { id: parseInt(id) },
-      data: updateData,
-      include: { assignedShop: { select: { id: true, name: true } } }
+    const updated = await prisma.user.findUnique({
+      where: { id: targetId },
+      include: { adminShops: { include: { shop: { select: { id: true, name: true } } } } }
     });
     res.json(updated);
   } catch (error) {
@@ -379,13 +390,21 @@ app.post('/api/categories', requireAuth, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Name is required' });
     }
 
-    // ADMIN может создавать категории только в своём направлении
-    const effectiveShopId = req.user.role === 'ADMIN'
-      ? req.user.assignedShopId
-      : (shopId ? parseInt(shopId) : null);
+    // ADMIN может создавать категории только в своих направлениях
+    const parsedShopId = shopId ? parseInt(shopId) : null;
+    let effectiveShopId = parsedShopId;
 
-    if (req.user.role === 'ADMIN' && !effectiveShopId) {
-      return res.status(403).json({ error: 'Вам не назначено направление' });
+    if (req.user.role === 'ADMIN') {
+      const adminShopIds = req.user.adminShopIds || [];
+      if (adminShopIds.length === 0) {
+        return res.status(403).json({ error: 'Вам не назначено ни одного направления' });
+      }
+      // Если shopId указан и есть в списке, используем его; иначе — первый доступный
+      if (parsedShopId && adminShopIds.includes(parsedShopId)) {
+        effectiveShopId = parsedShopId;
+      } else {
+        effectiveShopId = adminShopIds[0];
+      }
     }
 
     const newCategory = await prisma.category.create({
@@ -428,13 +447,17 @@ app.post('/api/products', requireAuth, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Title and price are required' });
     }
 
-    // ADMIN может добавлять товары только в свой Shop
-    const effectiveShopId = req.user.role === 'ADMIN'
-      ? req.user.assignedShopId
-      : (shopId ? parseInt(shopId) : null);
+    // ADMIN может добавлять товары только в свои Shop
+    const parsedShopId = shopId ? parseInt(shopId) : null;
+    let effectiveShopId = parsedShopId;
 
-    if (req.user.role === 'ADMIN' && !effectiveShopId) {
-      return res.status(403).json({ error: 'Вам не назначено направление' });
+    if (req.user.role === 'ADMIN') {
+      const adminShopIds = req.user.adminShopIds || [];
+      if (adminShopIds.length === 0) {
+        return res.status(403).json({ error: 'Вам не назначено ни одного направления' });
+      }
+      effectiveShopId = (parsedShopId && adminShopIds.includes(parsedShopId))
+        ? parsedShopId : adminShopIds[0];
     }
 
     const newProduct = await prisma.product.create({

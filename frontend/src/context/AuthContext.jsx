@@ -72,6 +72,7 @@ export function AuthProvider({ children }) {
         telegramId: user?.telegramId || '',
         balance: user?.balance ?? 0,
         assignedShopId: user?.assignedShopId ?? null,
+        adminShopIds: user?.adminShops?.map(as => as.shopId) ?? [],
         refetchUser: authenticate
     }
 
