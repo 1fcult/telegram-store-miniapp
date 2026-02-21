@@ -1,4 +1,4 @@
-export const API_BASE = 'http://localhost:3000';
+export const API_BASE = import.meta.env.VITE_API_BASE || 'https://178-72-165-215.nip.io';
 
 export const fetchWithAuth = async (url, options = {}) => {
     const tg = window.Telegram?.WebApp;
